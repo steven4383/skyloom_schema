@@ -1,0 +1,51 @@
+import '../utils/json_value_utils.dart';
+import 'field_schema.dart';
+
+/// Immutable, parsed definition of a Skyloom form.
+final class FormSchema {
+  FormSchema({
+    required this.id,
+    required List<FieldSchema> fields,
+    this.schemaVersion = '1.0',
+    this.title,
+    this.description,
+    Map<String, Object?> metadata = const {},
+    Map<String, Object?> additionalProperties = const {},
+  }) : fields = List<FieldSchema>.unmodifiable(fields),
+       metadata = _freezeMap(metadata, r'$.metadata'),
+       additionalProperties = _freezeMap(additionalProperties, r'$');
+
+  final String id;
+  final String schemaVersion;
+  final String? title;
+  final String? description;
+  final List<FieldSchema> fields;
+  final Map<String, Object?> metadata;
+
+  /// Properties preserved for forward compatibility but not interpreted yet.
+  final Map<String, Object?> additionalProperties;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      ..._thawMap(additionalProperties),
+      'schemaVersion': schemaVersion,
+      'id': id,
+      if (title != null) 'title': title,
+      if (description != null) 'description': description,
+      'fields': fields.map((field) => field.toJson()).toList(),
+      if (metadata.isNotEmpty) 'metadata': _thawMap(metadata),
+    };
+  }
+}
+
+Map<String, Object?> _freezeMap(Map<String, Object?> value, String path) {
+  return Map<String, Object?>.unmodifiable(
+    value.map(
+      (key, child) => MapEntry(key, freezeJsonValue(child, path: '$path.$key')),
+    ),
+  );
+}
+
+Map<String, Object?> _thawMap(Map<String, Object?> value) {
+  return value.map((key, child) => MapEntry(key, thawJsonValue(child)));
+}
