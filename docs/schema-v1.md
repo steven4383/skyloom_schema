@@ -1,8 +1,8 @@
 # Skyloom form schema 1.0
 
 This document defines the foundation schema supported by
-`skyloom_schema` 0.0.1. Later releases may add interpreted properties without
-breaking this contract.
+`skyloom_schema` 0.6.1. The contract remains forward-compatible: unknown
+properties are preserved during parsing and serialization.
 
 ## Form object
 
@@ -36,10 +36,51 @@ Common optional properties are:
 - `options`, an array of label/value objects
 - `validation`, an open JSON object whose keys name validation rules
 - `metadata`, an application-owned JSON object
+- `fields`, required when `type` is `object`
+- `items`, required when `type` is `array` (the item key may be omitted)
+- `minItems`, `maxItems`, and `defaultItem` for arrays
+- `dependsOn`, an array of field paths
+- `dependencyConfig`, which configures dependency behavior
 
 The parser preserves unknown properties in `additionalProperties`. This lets a
-0.0.1 consumer safely parse future properties such as `visibleWhen`, although
-the current engine does not interpret them.
+consumer safely parse properties introduced by later releases.
+
+## Object and array fields
+
+Object fields recursively contain `fields` and serialize as nested JSON
+objects. Array fields contain one `items` schema and serialize as JSON arrays.
+Items may be primitives, objects, or other arrays.
+
+```json
+{
+  "key": "employees",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "fields": [
+      {"key": "name", "type": "text"}
+    ]
+  }
+}
+```
+
+`minItems` and `maxItems` are non-negative integers and `minItems` cannot
+exceed `maxItems`. `defaultItem` may be any JSON-compatible value.
+
+## Dependencies
+
+`dependsOn` declares fields whose changes affect the current field. Relative
+paths inside an object resolve against that object before root paths are tried.
+
+`dependencyConfig` supports these booleans:
+
+- `clearOnChange` (default `false`)
+- `revalidateOnChange` (default `true`)
+- `reloadDataOnChange` (default `false`)
+- `preserveValueIfValid` (default `false`)
+
+Dependency paths must exist and the resulting graph must not contain cycles.
 
 ## Field keys and value paths
 

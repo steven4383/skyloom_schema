@@ -1,6 +1,8 @@
 import '../errors/schema_parse_exception.dart';
+import '../schema/dependency_schema.dart';
 import '../schema/field_option.dart';
 import '../schema/field_schema.dart';
+import '../schema/form_type.dart';
 import '../schema/form_schema.dart';
 import '../schema/validation_schema.dart';
 import '../utils/json_value_utils.dart';
@@ -23,19 +25,7 @@ final class SchemaParser {
       );
     }
 
-    final fields = <FieldSchema>[];
-    final keys = <String>{};
-    for (var index = 0; index < fieldsValue.length; index++) {
-      final path = '\$.fields[$index]';
-      final field = _parseField(fieldsValue[index], path);
-      if (!keys.add(field.key)) {
-        throw SchemaParseException(
-          'Field key "${field.key}" is duplicated.',
-          path: '$path.key',
-        );
-      }
-      fields.add(field);
-    }
+    final fields = _parseFields(fieldsValue, r'$.fields');
 
     return FormSchema(
       id: _requiredString(json, 'id', r'$.id'),
@@ -56,14 +46,122 @@ final class SchemaParser {
     );
   }
 
-  FieldSchema _parseField(Object? source, String path) {
+  List<FieldSchema> _parseFields(List<Object?> source, String path) {
+    final fields = <FieldSchema>[];
+    final keys = <String>{};
+    for (var index = 0; index < source.length; index++) {
+      final fieldPath = '$path[$index]';
+      final field = _parseField(source[index], fieldPath);
+      if (!keys.add(field.key)) {
+        throw SchemaParseException(
+          'Field key "${field.key}" is duplicated.',
+          path: '$fieldPath.key',
+        );
+      }
+      fields.add(field);
+    }
+    return fields;
+  }
+
+  FieldSchema _parseField(
+    Object? source,
+    String path, {
+    bool requireKey = true,
+  }) {
     final json = _object(source, path);
-    final key = _requiredString(json, 'key', '$path.key');
+    final hasExplicitKey = json.containsKey('key');
+    final key = requireKey || hasExplicitKey
+        ? _requiredString(json, 'key', '$path.key')
+        : 'item';
     if (!_fieldPathPattern.hasMatch(key)) {
       throw SchemaParseException(
         'Field keys must use dot-separated identifiers and optional numeric '
         'indexes, for example "address.city" or "employees[0].name".',
         path: '$path.key',
+      );
+    }
+
+    final type = _requiredString(json, 'type', '$path.type');
+
+    List<FieldSchema>? childFields;
+    if (json.containsKey('fields')) {
+      final fieldsValue = json['fields'];
+      if (fieldsValue is! List<Object?>) {
+        throw SchemaParseException(
+          'Property "fields" must be an array.',
+          path: '$path.fields',
+        );
+      }
+      childFields = _parseFields(fieldsValue, '$path.fields');
+    }
+    if (type == FormType.object && childFields == null) {
+      throw SchemaParseException(
+        'Object fields require a "fields" array.',
+        path: '$path.fields',
+      );
+    }
+
+    FieldSchema? items;
+    if (json.containsKey('items')) {
+      items = _parseField(json['items'], '$path.items', requireKey: false);
+    }
+    if (type == FormType.array && items == null) {
+      throw SchemaParseException(
+        'Array fields require an "items" schema.',
+        path: '$path.items',
+      );
+    }
+
+    final minItems = _optionalInt(json, 'minItems', '$path.minItems');
+    final maxItems = _optionalInt(json, 'maxItems', '$path.maxItems');
+    if (minItems != null && minItems < 0) {
+      throw SchemaParseException(
+        'Property "minItems" cannot be negative.',
+        path: '$path.minItems',
+      );
+    }
+    if (maxItems != null && maxItems < 0) {
+      throw SchemaParseException(
+        'Property "maxItems" cannot be negative.',
+        path: '$path.maxItems',
+      );
+    }
+    if (minItems != null && maxItems != null && minItems > maxItems) {
+      throw SchemaParseException(
+        'Property "minItems" cannot exceed "maxItems".',
+        path: '$path.minItems',
+      );
+    }
+
+    final dependsOn = _stringList(json, 'dependsOn', '$path.dependsOn');
+    var dependency = const DependencySchema();
+    if (json.containsKey('dependencyConfig')) {
+      final config = _object(
+        json['dependencyConfig'],
+        '$path.dependencyConfig',
+      );
+      dependency = DependencySchema(
+        clearOnChange: _optionalBool(
+          config,
+          'clearOnChange',
+          '$path.dependencyConfig.clearOnChange',
+        ),
+        revalidateOnChange: _optionalBoolDefault(
+          config,
+          'revalidateOnChange',
+          '$path.dependencyConfig.revalidateOnChange',
+          defaultValue: true,
+        ),
+        reloadDataOnChange: _optionalBool(
+          config,
+          'reloadDataOnChange',
+          '$path.dependencyConfig.reloadDataOnChange',
+        ),
+        preserveValueIfValid: _optionalBool(
+          config,
+          'preserveValueIfValid',
+          '$path.dependencyConfig.preserveValueIfValid',
+        ),
       );
     }
 
@@ -103,7 +201,7 @@ final class SchemaParser {
 
     return FieldSchema(
       key: key,
-      type: _requiredString(json, 'type', '$path.type'),
+      type: type,
       label: _optionalString(json, 'label', '$path.label'),
       description: _optionalString(json, 'description', '$path.description'),
       helperText: _optionalString(json, 'helperText', '$path.helperText'),
@@ -116,7 +214,18 @@ final class SchemaParser {
       disabled: _optionalBool(json, 'disabled', '$path.disabled'),
       readOnly: _optionalBool(json, 'readOnly', '$path.readOnly'),
       hidden: _optionalBool(json, 'hidden', '$path.hidden'),
+      hasExplicitKey: hasExplicitKey,
       options: options,
+      fields: childFields,
+      items: items,
+      minItems: minItems,
+      maxItems: maxItems,
+      defaultItem: json.containsKey('defaultItem')
+          ? freezeJsonValue(json['defaultItem'], path: '$path.defaultItem')
+          : null,
+      hasDefaultItem: json.containsKey('defaultItem'),
+      dependsOn: dependsOn,
+      dependency: dependency,
       validation: validation,
       metadata: _optionalObject(json, 'metadata', '$path.metadata'),
       additionalProperties: _additionalProperties(json, const {
@@ -132,6 +241,13 @@ final class SchemaParser {
         'readOnly',
         'hidden',
         'options',
+        'fields',
+        'items',
+        'minItems',
+        'maxItems',
+        'defaultItem',
+        'dependsOn',
+        'dependencyConfig',
         'validation',
         'metadata',
       }, path),
@@ -212,6 +328,40 @@ final class SchemaParser {
       );
     }
     return value;
+  }
+
+  bool _optionalBoolDefault(
+    Map<String, Object?> json,
+    String key,
+    String path, {
+    required bool defaultValue,
+  }) {
+    if (!json.containsKey(key)) return defaultValue;
+    return _optionalBool(json, key, path);
+  }
+
+  int? _optionalInt(Map<String, Object?> json, String key, String path) {
+    if (!json.containsKey(key)) return null;
+    final value = json[key];
+    if (value is! int) {
+      throw SchemaParseException(
+        'Property "$key" must be an integer.',
+        path: path,
+      );
+    }
+    return value;
+  }
+
+  List<String> _stringList(Map<String, Object?> json, String key, String path) {
+    if (!json.containsKey(key)) return const [];
+    final value = json[key];
+    if (value is! List<Object?> || value.any((item) => item is! String)) {
+      throw SchemaParseException(
+        'Property "$key" must be an array of strings.',
+        path: path,
+      );
+    }
+    return value.cast<String>();
   }
 
   Map<String, Object?> _optionalObject(

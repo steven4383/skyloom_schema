@@ -72,4 +72,82 @@ void main() {
     expect(engine.validateField(checkbox, false, values), 'Value is required.');
     expect(engine.validateField(switchField, false, values), isNull);
   });
+
+  test('supports URL and cross-field equality rules', () {
+    final urlField = field({ValidationRule.url: true});
+    expect(
+      engine.validateField(urlField, 'not-a-url', values),
+      'Enter a valid URL.',
+    );
+    expect(
+      engine.validateField(urlField, 'https://skyloom.dev/docs', values),
+      isNull,
+    );
+
+    final sameAsField = field({ValidationRule.sameAs: 'password'});
+    expect(
+      engine.validateField(sameAsField, 'different', const {
+        'password': 'secret',
+      }),
+      'Value must match password.',
+    );
+    expect(
+      engine.validateField(sameAsField, 'secret', const {'password': 'secret'}),
+      isNull,
+    );
+  });
+
+  test('supports numeric and date cross-field comparisons', () {
+    final lessThan = field({ValidationRule.lessThanOrEqual: 'total'});
+    expect(
+      engine.validateField(lessThan, '20', const {'total': '100'}),
+      isNull,
+    );
+    expect(
+      engine.validateField(lessThan, 101, const {'total': 100}),
+      'Value must be less than or equal to total.',
+    );
+
+    final after = field({ValidationRule.greaterThan: 'startDate'});
+    expect(
+      engine.validateField(after, '2026-09-18', const {
+        'startDate': '2026-09-17',
+      }),
+      isNull,
+    );
+    expect(
+      engine.validateField(after, '2026-09-16', const {
+        'startDate': '2026-09-17',
+      }),
+      'Value must be greater than startDate.',
+    );
+  });
+
+  test('enforces array item-count bounds including empty arrays', () {
+    final schema = const SchemaParser()
+        .parse({
+          'id': 'arrays',
+          'fields': [
+            {
+              'key': 'tags',
+              'type': FormType.array,
+              'minItems': 1,
+              'maxItems': 2,
+              'items': {'type': FormType.text},
+            },
+          ],
+        })
+        .fields
+        .single;
+
+    expect(
+      engine.validateField(schema, const [], values),
+      'tags must contain at least 1 item.',
+    );
+    expect(engine.validateField(schema, const ['one'], values), isNull);
+    expect(
+      engine.validateField(schema, const ['one', 'two', 'three'], values),
+      'tags must contain at most 2 items.',
+    );
+  });
 }

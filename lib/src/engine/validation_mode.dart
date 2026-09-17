@@ -1,4 +1,4 @@
-/// Determines when field validation runs automatically in [SkyloomForm].
+/// Determines when field validation runs automatically in form widgets.
 enum SkyloomValidationMode {
   /// Validate after every value change, on blur, and on submission.
   onChange,

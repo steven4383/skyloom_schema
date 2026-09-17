@@ -171,4 +171,216 @@ void main() {
     controller.field('email').setLoading(true);
     expect(controller.loading, isTrue);
   });
+
+  test('runs registered custom validators', () {
+    final customSchema = const SchemaParser().parse({
+      'id': 'custom_validation',
+      'fields': [
+        {
+          'key': 'employeeId',
+          'type': FormType.text,
+          'validation': {
+            ValidationRule.custom: ['startsWithEmployee', 'notReserved'],
+          },
+        },
+      ],
+    });
+    final controller = SkyloomFormController(
+      schema: customSchema,
+      validators: {
+        'startsWithEmployee': (value, context) =>
+            value is String && value.startsWith('EMP-')
+            ? null
+            : 'Employee IDs must start with EMP-.',
+        'notReserved': (value, context) =>
+            value == 'EMP-000' ? 'This employee ID is reserved.' : null,
+      },
+    );
+    addTearDown(controller.dispose);
+
+    controller.setValue('employeeId', 'INVALID');
+    expect(controller.validateField('employeeId'), isFalse);
+    expect(
+      controller.errors['employeeId'],
+      'Employee IDs must start with EMP-.',
+    );
+
+    controller.setValue('employeeId', 'EMP-123');
+    expect(controller.validateField('employeeId'), isTrue);
+  });
+
+  test('reacts to visibility, required, enabled, and read-only conditions', () {
+    final conditionalSchema = const SchemaParser().parse({
+      'id': 'conditions',
+      'fields': [
+        {'key': 'accountType', 'type': FormType.text},
+        {'key': 'locked', 'type': FormType.checkbox},
+        {
+          'key': 'companyName',
+          'type': FormType.text,
+          'visibleWhen': {'field': 'accountType', 'equals': 'business'},
+          'requiredWhen': {'field': 'accountType', 'equals': 'business'},
+          'readOnlyWhen': {'field': 'locked', 'equals': true},
+        },
+        {
+          'key': 'personalName',
+          'type': FormType.text,
+          'disabledWhen': {'field': 'accountType', 'equals': 'business'},
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: conditionalSchema);
+    addTearDown(controller.dispose);
+
+    expect(controller.field('companyName').visible, isFalse);
+    expect(controller.field('companyName').required, isFalse);
+
+    controller.setValue('accountType', 'business');
+    expect(controller.field('companyName').visible, isTrue);
+    expect(controller.field('companyName').required, isTrue);
+    expect(controller.field('personalName').disabled, isTrue);
+    expect(controller.validateField('companyName'), isFalse);
+
+    controller.setValue('locked', true);
+    expect(controller.field('companyName').readOnly, isTrue);
+  });
+
+  test('builds, updates, and serializes deeply nested object fields', () {
+    final nestedSchema = const SchemaParser().parse({
+      'id': 'nested',
+      'fields': [
+        {
+          'key': 'company',
+          'type': FormType.object,
+          'fields': [
+            {
+              'key': 'address',
+              'type': FormType.object,
+              'fields': [
+                {
+                  'key': 'city',
+                  'type': FormType.text,
+                  'defaultValue': 'Chennai',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: nestedSchema);
+    addTearDown(controller.dispose);
+
+    expect(controller.value('company.address.city'), 'Chennai');
+    expect(controller.value('company'), {
+      'address': {'city': 'Chennai'},
+    });
+
+    controller.setValue('company.address', {'city': 'Bengaluru'});
+    expect(controller.values, {
+      'company': {
+        'address': {'city': 'Bengaluru'},
+      },
+    });
+  });
+
+  test('supports array defaults, add, duplicate, reorder, and remove', () {
+    final arraySchema = const SchemaParser().parse({
+      'id': 'arrays',
+      'fields': [
+        {
+          'key': 'employees',
+          'type': FormType.array,
+          'minItems': 1,
+          'maxItems': 3,
+          'defaultItem': {'name': 'New'},
+          'items': {
+            'type': FormType.object,
+            'fields': [
+              {
+                'key': 'name',
+                'type': FormType.text,
+                'validation': {'required': true},
+              },
+            ],
+          },
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: arraySchema);
+    addTearDown(controller.dispose);
+
+    expect(controller.value('employees'), [
+      {'name': 'New'},
+    ]);
+    expect(controller.addArrayItem('employees', {'name': 'Alex'}), isTrue);
+    expect(controller.duplicateArrayItem('employees', 1), isTrue);
+    expect(controller.addArrayItem('employees'), isFalse);
+    expect(controller.reorderArrayItem('employees', 2, 0), isTrue);
+    expect(controller.removeArrayItem('employees', 1), isTrue);
+    expect(controller.removeArrayItem('employees', 1), isTrue);
+    expect(controller.removeArrayItem('employees', 0), isFalse);
+    expect(controller.validateField('employees'), isTrue);
+  });
+
+  test('processes dependency chains and reports reload hooks', () {
+    final dependencySchema = const SchemaParser().parse({
+      'id': 'locations',
+      'fields': [
+        {'key': 'country', 'type': FormType.text},
+        {
+          'key': 'state',
+          'type': FormType.text,
+          'dependsOn': ['country'],
+          'dependencyConfig': {
+            'clearOnChange': true,
+            'reloadDataOnChange': true,
+          },
+        },
+        {
+          'key': 'city',
+          'type': FormType.text,
+          'dependsOn': ['state'],
+          'dependencyConfig': {'clearOnChange': true},
+        },
+      ],
+    });
+    final changes = <SkyloomDependencyChange>[];
+    final controller = SkyloomFormController(
+      schema: dependencySchema,
+      initialValues: const {'country': 'IN', 'state': 'TN', 'city': 'Chennai'},
+      onDependencyChanged: changes.add,
+    );
+    addTearDown(controller.dispose);
+
+    controller.setValue('country', 'US');
+
+    expect(controller.value('state'), isNull);
+    expect(controller.value('city'), isNull);
+    expect(changes.map((change) => change.dependentKey), ['city', 'state']);
+    expect(changes.last.configuration.reloadDataOnChange, isTrue);
+  });
+
+  test('rejects circular dependency graphs', () {
+    final circular = const SchemaParser().parse({
+      'id': 'circular',
+      'fields': [
+        {
+          'key': 'a',
+          'type': FormType.text,
+          'dependsOn': ['b'],
+        },
+        {
+          'key': 'b',
+          'type': FormType.text,
+          'dependsOn': ['a'],
+        },
+      ],
+    });
+
+    expect(
+      () => SkyloomFormController(schema: circular),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
 }

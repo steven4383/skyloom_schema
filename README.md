@@ -8,8 +8,7 @@ while keeping rendering replaceable.
 
 ## Project status
 
-The package is currently at version `0.1.0`, the first usable form-rendering
-milestone.
+The package is currently at version `0.6.1`.
 
 Available now:
 
@@ -22,14 +21,24 @@ Available now:
   `employees[0].name`
 - JSON serialization
 - Reactive `SkyloomFormController` and `SkyloomFieldController` state
-- Required, length, numeric, email, pattern, and regex validation
+- Required, length, numeric, email, URL, pattern, regex, and cross-field
+  validation
+- Change, blur, submit, and manual validation modes
+- Named custom validators
 - Backend field-error APIs
 - A replaceable field-renderer registry
 - `SkyloomForm` and `SkyloomForm.fromJson`
 - Theme-aware Material renderers for all initial field types
+- Built-in scrolling, padding, and local input-decoration styling
+- Conditional visibility, required, enabled, disabled, and read-only state
+- Nested `all`, `any`, and `not` condition groups
+- Recursive object fields with deep Material 3 rendering
+- Primitive, object, and nested arrays with add, remove, duplicate, and reorder
+- Array bounds, default items, recursive validation, and JSON output
+- Dependency graphs with clear, preserve, revalidate, and reload hooks
 
-Conditional logic, arrays, async data, async validation, sections, and
-multi-step workflows remain on the roadmap.
+Async data, async validation, sections, and multi-step workflows remain on the
+roadmap.
 
 ## How the complete system works
 
@@ -68,7 +77,7 @@ to the controller. This separation allows the same form definition to use the
 default Material interface, an application-specific renderer, or the future
 `skyloom_ui` component library.
 
-## Using the foundation API
+## Parsing a schema
 
 Parse a JSON-compatible Dart map with `SchemaParser`:
 
@@ -109,6 +118,26 @@ print(schema.fields.first.key); // name
 `SchemaParser.parse` accepts decoded JSON data, validates its structure, and
 returns an immutable `FormSchema`. Field types remain strings instead of a
 closed enum so custom renderer types can be introduced later.
+
+### Dart field-type constants
+
+Use `FormType` when authoring a schema in Dart to avoid repeated magic strings
+while keeping the resulting data JSON-compatible:
+
+```dart
+const field = {
+  'key': 'email',
+  'type': FormType.email,
+  'validation': {
+    ValidationRule.required: true,
+    ValidationRule.email: true,
+  },
+};
+```
+
+`FormType.switchField` represents the JSON value `"switch"`; the longer Dart
+name is necessary because `switch` is a language keyword. JSON received from a
+server continues to use ordinary strings such as `"text"` and `"select"`.
 
 ### Reading JSON text
 
@@ -164,7 +193,7 @@ The full foundation contract is documented in the
 
 ## Complete schema and values example
 
-The following example uses APIs available in `0.1.0`. It defines a form,
+The following example uses APIs available in `0.6.1`. It defines a form,
 parses it, creates nested values, and produces JSON-compatible output.
 
 Validation definitions are parsed with the schema and executed when the schema
@@ -275,18 +304,34 @@ const employeeSchemaJson = <String, Object?>{
         },
       },
       {
-        'key': 'address.city',
-        'type': 'text',
-        'label': 'City',
+        'key': 'address',
+        'type': FormType.object,
+        'label': 'Address',
+        'fields': [
+          {'key': 'city', 'type': FormType.text, 'label': 'City'},
+          {
+            'key': 'country',
+            'type': FormType.select,
+            'label': 'Country',
+            'options': [
+              {'label': 'India', 'value': 'IN'},
+              {'label': 'United States', 'value': 'US'},
+            ],
+          },
+        ],
       },
       {
-        'key': 'address.country',
-        'type': 'select',
-        'label': 'Country',
-        'options': [
-          {'label': 'India', 'value': 'IN'},
-          {'label': 'United States', 'value': 'US'},
-        ],
+        'key': 'emergencyContacts',
+        'type': FormType.array,
+        'label': 'Emergency contacts',
+        'minItems': 1,
+        'items': {
+          'type': FormType.object,
+          'fields': [
+            {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+            {'key': 'phone', 'type': FormType.text, 'label': 'Phone'},
+          ],
+        },
       },
     ],
 };
@@ -295,30 +340,26 @@ void main() {
 
   final schema = const SchemaParser().parse(employeeSchemaJson);
 
-  final values = <String, Object?>{};
-
-  // Apply defaults. A later FormController will do this automatically.
-  for (final field in schema.fields) {
-    if (field.hasDefaultValue) {
-      PathUtils.setValue(values, field.key, field.defaultValue);
-    }
-  }
-
-  // Simulate values that will eventually come from Flutter field renderers.
-  PathUtils.setValue(values, 'name', 'Steven');
-  PathUtils.setValue(values, 'email', 'steven@example.com');
-  PathUtils.setValue(values, 'age', 27);
-  PathUtils.setValue(values, 'password', 'temporary-password');
-  PathUtils.setValue(values, 'notes', 'Remote employee');
-  PathUtils.setValue(values, 'role', 'developer');
-  PathUtils.setValue(values, 'contactPreference', 'email');
-  PathUtils.setValue(values, 'acceptedTerms', true);
-  PathUtils.setValue(values, 'dateOfBirth', '1999-05-14');
-  PathUtils.setValue(values, 'address.city', 'Chennai');
-  PathUtils.setValue(values, 'address.country', 'IN');
+  final controller = SkyloomFormController(schema: schema);
+  controller.patchValues({
+    'name': 'Steven',
+    'email': 'steven@example.com',
+    'age': 27,
+    'password': 'temporary-password',
+    'notes': 'Remote employee',
+    'role': 'developer',
+    'contactPreference': 'email',
+    'acceptedTerms': true,
+    'dateOfBirth': '1999-05-14',
+    'address': {'city': 'Chennai', 'country': 'IN'},
+  });
+  controller.setValue('emergencyContacts', [
+    {'name': 'Alex', 'phone': '+91 90000 00000'},
+  ]);
 
   print('Form: ${schema.title}');
-  print(const JsonEncoder.withIndent('  ').convert(values));
+  print(const JsonEncoder.withIndent('  ').convert(controller.values));
+  controller.dispose();
 }
 ```
 
@@ -342,12 +383,14 @@ The resulting value object is:
   "address": {
     "city": "Chennai",
     "country": "IN"
-  }
+  },
+  "emergencyContacts": [
+    {"name": "Alex", "phone": "+91 90000 00000"}
+  ]
 }
 ```
 
-Once the controller and default Material renderer are implemented, the same
-schema will be passed directly to the form widget:
+The same schema can be passed directly to the form widget:
 
 ```dart
 class EmployeeFormPage extends StatelessWidget {
@@ -384,6 +427,10 @@ Use `SkyloomForm.fromJson` to parse and render a schema in one step:
 ```dart
 SkyloomForm.fromJson(
   schema: employeeSchemaJson,
+  padding: const EdgeInsets.all(16),
+  inputDecorationTheme: const InputDecorationTheme(
+    border: OutlineInputBorder(),
+  ),
   initialValues: const {
     'name': 'Steven',
   },
@@ -413,6 +460,7 @@ controller.setValue('email', 'test@example.com');
 controller.patchValues({'name': 'Steven'});
 controller.validate();
 controller.reset();
+controller.loadJson(existingEmployee); // New pristine edit baseline.
 controller.clear();
 controller.submit();
 ```
@@ -421,6 +469,152 @@ Each field controller tracks its value, initial value, dirty, touched, focused,
 valid, loading, visible, enabled, and read-only states. Controllers use Flutter
 listenable primitives internally without requiring Riverpod,
 Bloc, Provider, GetX, or another state-management framework.
+
+### Validation timing
+
+```dart
+SkyloomForm.fromJson(
+  schema: employeeSchemaJson,
+  validationMode: SkyloomValidationMode.onBlur,
+);
+```
+
+Available modes are `onChange`, `onBlur`, `onSubmit`, and `manual`. Manual mode
+leaves validation entirely under controller control.
+
+### Custom validators
+
+Reference validators by name in JSON and register their Dart implementations
+on the form:
+
+```dart
+const employeeIdField = {
+  'key': 'employeeId',
+  'type': FormType.text,
+  'validation': {
+    ValidationRule.custom: ['employeeIdFormat'],
+  },
+};
+
+SkyloomForm.fromJson(
+  schema: employeeSchemaJson,
+  validators: {
+    'employeeIdFormat': (value, context) {
+      return value is String && value.startsWith('EMP-')
+          ? null
+          : 'Employee IDs must start with EMP-.';
+    },
+  },
+);
+```
+
+### Conditional fields
+
+```dart
+{
+  'key': 'companyName',
+  'type': FormType.text,
+  'visibleWhen': {
+    'field': 'accountType',
+    'equals': 'business',
+  },
+  'requiredWhen': {
+    'field': 'accountType',
+    'equals': 'business',
+  },
+}
+```
+
+Conditions support `equals`, `notEquals`, `contains`, `notContains`, `in`,
+`notIn`, `empty`, `notEmpty`, numeric/date comparisons, and nested `all`, `any`,
+and `not` groups. They can control visibility, required, enabled, disabled, and
+read-only state.
+
+### Cross-field validation
+
+Comparison rules reference another field path and work with numbers, numeric
+strings, ISO dates, and nested paths:
+
+```dart
+{
+  'key': 'endDate',
+  'type': FormType.date,
+  'validation': {
+    ValidationRule.greaterThan: 'startDate',
+  },
+}
+```
+
+Available rules are `sameAs`, `notSameAs`, `greaterThan`,
+`greaterThanOrEqual`, `lessThan`, and `lessThanOrEqual`. Custom validators can
+read the complete value tree from `context.values`.
+
+### Nested object fields
+
+Objects can be nested to any depth. Child controllers use full paths such as
+`company.address.city`, while submitted values retain their object shape:
+
+```dart
+{
+  'key': 'address',
+  'type': FormType.object,
+  'label': 'Address',
+  'fields': [
+    {'key': 'city', 'type': FormType.text, 'label': 'City'},
+    {'key': 'country', 'type': FormType.text, 'label': 'Country'},
+  ],
+}
+```
+
+### Repeatable arrays
+
+Arrays support primitive items, object groups, and nested arrays:
+
+```dart
+{
+  'key': 'employees',
+  'type': FormType.array,
+  'label': 'Employees',
+  'minItems': 1,
+  'maxItems': 10,
+  'defaultItem': {'name': '', 'email': ''},
+  'items': {
+    'type': FormType.object,
+    'fields': [
+      {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+      {'key': 'email', 'type': FormType.email, 'label': 'Email'},
+    ],
+  },
+}
+```
+
+The default Material renderer includes item controls. Controller APIs are
+also available directly: `addArrayItem`, `removeArrayItem`,
+`duplicateArrayItem`, and `reorderArrayItem`.
+
+### Field dependencies
+
+Declare dependency edges in the schema:
+
+```dart
+{
+  'key': 'state',
+  'type': FormType.select,
+  'dependsOn': ['country'],
+  'dependencyConfig': {
+    'clearOnChange': true,
+    'revalidateOnChange': true,
+    'reloadDataOnChange': true,
+    'preserveValueIfValid': false,
+  },
+}
+```
+
+When `country` changes, the controller processes `state` and then any fields
+that depend on `state`. Circular graphs and unknown dependency paths are
+rejected. Use `SkyloomForm.onDependencyChanged` or the corresponding
+controller callback to start application-owned data loading; async data-source
+definitions themselves are planned for `0.7.0`.
 
 ## Default Material 3 interface
 
@@ -432,6 +626,8 @@ types:
 - Checkbox, radio, and switch
 - Select
 - Date
+- Nested object groups
+- Primitive, object, and nested repeatable arrays
 
 The default renderer is functional, accessible, and theme-aware. It reads
 `Theme.of(context)`, `ColorScheme`, and the application's component themes. It
@@ -451,6 +647,11 @@ MaterialApp(
 ```
 
 This keeps generated forms consistent with the host application's design.
+
+`SkyloomFormLayout.scrollable` is the default, preventing large forms from
+overflowing when the form receives a bounded height. Use
+`SkyloomFormLayout.column` when a parent `ListView` or another scrollable widget
+already owns scrolling.
 
 ## Relationship with skyloom_ui
 
@@ -522,8 +723,8 @@ The current implementation sequence is:
 6. Renderer contract and registry - complete
 7. Material 3 text-field vertical slice - complete
 8. Remaining basic Material fields - complete
-9. Conditional logic and dynamic properties
-10. Nested objects, arrays, and dependencies
+9. Conditional logic and dynamic properties - complete
+10. Nested objects, arrays, and dependencies - complete
 11. Async data and async validation
 12. Layout metadata, sections, and multi-step forms
 13. Performance, accessibility, documentation, and examples

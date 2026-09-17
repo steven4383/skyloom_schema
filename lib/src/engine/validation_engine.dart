@@ -13,9 +13,9 @@ final class ValidationEngine {
   String? validateField(
     FieldSchema field,
     Object? value,
-    Map<String, Object?> formValues,
-    {bool? requiredOverride}
-  ) {
+    Map<String, Object?> formValues, {
+    bool? requiredOverride,
+  }) {
     final rules = field.validation?.rules ?? const <String, Object?>{};
     final label = field.label ?? field.key;
 
@@ -28,10 +28,27 @@ final class ValidationEngine {
       return _message(requiredRule) ?? '$label is required.';
     }
 
-    // Optional empty values do not run the remaining validators.
-    if (_isEmpty(value)) {
-      return null;
+    if (field.type == FormType.object && value is! Map<Object?, Object?>) {
+      if (_isEmpty(value)) return null;
+      return '$label must be an object.';
     }
+    if (field.type == FormType.array) {
+      if (value is! List<Object?>) {
+        if (_isEmpty(value)) return null;
+        return '$label must be an array.';
+      }
+      if (field.minItems != null && value.length < field.minItems!) {
+        final noun = field.minItems == 1 ? 'item' : 'items';
+        return '$label must contain at least ${field.minItems} $noun.';
+      }
+      if (field.maxItems != null && value.length > field.maxItems!) {
+        final noun = field.maxItems == 1 ? 'item' : 'items';
+        return '$label must contain at most ${field.maxItems} $noun.';
+      }
+    }
+
+    // Optional empty values do not run the remaining validators.
+    if (_isEmpty(value)) return null;
 
     final minLength = _numberValue(rules[ValidationRule.minLength]);
     if (minLength != null &&
@@ -96,6 +113,37 @@ final class ValidationEngine {
       return _message(notSameAsRule) ?? '$label must not match $notSameAsPath.';
     }
 
+    final comparisonRules = <(String, String, bool Function(int))>[
+      (
+        ValidationRule.greaterThan,
+        'be greater than',
+        (comparison) => comparison > 0,
+      ),
+      (
+        ValidationRule.greaterThanOrEqual,
+        'be greater than or equal to',
+        (comparison) => comparison >= 0,
+      ),
+      (ValidationRule.lessThan, 'be less than', (comparison) => comparison < 0),
+      (
+        ValidationRule.lessThanOrEqual,
+        'be less than or equal to',
+        (comparison) => comparison <= 0,
+      ),
+    ];
+    for (final (ruleName, description, predicate) in comparisonRules) {
+      final rule = rules[ruleName];
+      final otherPath = _stringValue(rule);
+      if (otherPath == null) continue;
+      final comparison = _compare(
+        value,
+        PathUtils.getValue(formValues, otherPath),
+      );
+      if (comparison == null || !predicate(comparison)) {
+        return _message(rule) ?? '$label must $description $otherPath.';
+      }
+    }
+
     final patternRule =
         rules[ValidationRule.pattern] ?? rules[ValidationRule.regex];
     final pattern = _stringValue(patternRule);
@@ -154,6 +202,24 @@ final class ValidationEngine {
     return uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         uri.host.isNotEmpty;
+  }
+
+  int? _compare(Object? left, Object? right) {
+    if (left is num && right is num) return left.compareTo(right);
+    if (left is String && right is String) {
+      final leftNumber = num.tryParse(left);
+      final rightNumber = num.tryParse(right);
+      if (leftNumber != null && rightNumber != null) {
+        return leftNumber.compareTo(rightNumber);
+      }
+      final leftDate = DateTime.tryParse(left);
+      final rightDate = DateTime.tryParse(right);
+      if (leftDate != null && rightDate != null) {
+        return leftDate.compareTo(rightDate);
+      }
+      return left.compareTo(right);
+    }
+    return null;
   }
 
   bool _deepEquals(Object? left, Object? right) {

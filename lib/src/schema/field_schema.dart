@@ -1,4 +1,5 @@
 import '../utils/json_value_utils.dart';
+import 'dependency_schema.dart';
 import 'field_option.dart';
 import 'validation_schema.dart';
 
@@ -17,7 +18,16 @@ final class FieldSchema {
     this.disabled = false,
     this.readOnly = false,
     this.hidden = false,
+    this.hasExplicitKey = true,
     List<FieldOption>? options,
+    List<FieldSchema>? fields,
+    this.items,
+    this.minItems,
+    this.maxItems,
+    Object? defaultItem,
+    this.hasDefaultItem = false,
+    List<String> dependsOn = const [],
+    this.dependency = const DependencySchema(),
     this.validation,
     Map<String, Object?> metadata = const {},
     Map<String, Object?> additionalProperties = const {},
@@ -28,6 +38,9 @@ final class FieldSchema {
        options = options == null
            ? null
            : List<FieldOption>.unmodifiable(options),
+       fields = fields == null ? null : List<FieldSchema>.unmodifiable(fields),
+       defaultItem = freezeJsonValue(defaultItem, path: r'$.field.defaultItem'),
+       dependsOn = List<String>.unmodifiable(dependsOn),
        metadata = _freezeMap(metadata, r'$.field.metadata'),
        additionalProperties = _freezeMap(additionalProperties, r'$.field');
 
@@ -47,7 +60,16 @@ final class FieldSchema {
   final bool disabled;
   final bool readOnly;
   final bool hidden;
+  final bool hasExplicitKey;
   final List<FieldOption>? options;
+  final List<FieldSchema>? fields;
+  final FieldSchema? items;
+  final int? minItems;
+  final int? maxItems;
+  final Object? defaultItem;
+  final bool hasDefaultItem;
+  final List<String> dependsOn;
+  final DependencySchema dependency;
   final ValidationSchema? validation;
   final Map<String, Object?> metadata;
 
@@ -57,7 +79,7 @@ final class FieldSchema {
   Map<String, Object?> toJson() {
     return <String, Object?>{
       ..._thawMap(additionalProperties),
-      'key': key,
+      if (hasExplicitKey) 'key': key,
       'type': type,
       if (label != null) 'label': label,
       if (description != null) 'description': description,
@@ -70,6 +92,15 @@ final class FieldSchema {
       if (hidden) 'hidden': true,
       if (options != null)
         'options': options!.map((option) => option.toJson()).toList(),
+      if (fields != null)
+        'fields': fields!.map((field) => field.toJson()).toList(),
+      if (items != null) 'items': items!.toJson(),
+      if (minItems != null) 'minItems': minItems,
+      if (maxItems != null) 'maxItems': maxItems,
+      if (hasDefaultItem) 'defaultItem': thawJsonValue(defaultItem),
+      if (dependsOn.isNotEmpty) 'dependsOn': dependsOn,
+      if (dependsOn.isNotEmpty && dependency.toJson().isNotEmpty)
+        'dependencyConfig': dependency.toJson(),
       if (validation != null) 'validation': validation!.toJson(),
       if (metadata.isNotEmpty) 'metadata': _thawMap(metadata),
     };

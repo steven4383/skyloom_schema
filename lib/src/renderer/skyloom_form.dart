@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../controller/form_controller.dart';
+import '../engine/validation_mode.dart';
 import '../parser/schema_parser.dart';
 import '../registry/renderer_registry.dart';
+import '../schema/field_schema.dart';
 import '../schema/form_schema.dart';
 import 'field_renderer.dart';
 import 'material/material_renderers.dart';
@@ -29,7 +31,9 @@ final class SkyloomForm extends StatefulWidget {
     this.onSubmit,
     this.renderers = const {},
     this.validators = const {},
-    this.validateOnChange = true,
+    this.onDependencyChanged,
+    bool? validateOnChange,
+    this.validationMode = SkyloomValidationMode.onChange,
     this.showSubmitButton = true,
     this.submitButtonLabel = 'Submit',
     this.fieldSpacing = 16,
@@ -37,7 +41,7 @@ final class SkyloomForm extends StatefulWidget {
     this.padding = EdgeInsets.zero,
     this.inputDecorationTheme,
     super.key,
-  });
+  }) : _validateOnChangeOverride = validateOnChange;
 
   /// Parses [schema] and creates a form using the default Material renderers.
   factory SkyloomForm.fromJson({
@@ -48,7 +52,9 @@ final class SkyloomForm extends StatefulWidget {
     SkyloomSubmitCallback? onSubmit,
     Map<String, SkyloomFieldRenderer> renderers = const {},
     Map<String, SkyloomValidator> validators = const {},
-    bool validateOnChange = true,
+    SkyloomDependencyCallback? onDependencyChanged,
+    bool? validateOnChange,
+    SkyloomValidationMode validationMode = SkyloomValidationMode.onChange,
     bool showSubmitButton = true,
     String submitButtonLabel = 'Submit',
     double fieldSpacing = 16,
@@ -67,7 +73,9 @@ final class SkyloomForm extends StatefulWidget {
       onSubmit: onSubmit,
       renderers: renderers,
       validators: validators,
+      onDependencyChanged: onDependencyChanged,
       validateOnChange: validateOnChange,
+      validationMode: validationMode,
       showSubmitButton: showSubmitButton,
       submitButtonLabel: submitButtonLabel,
       fieldSpacing: fieldSpacing,
@@ -86,7 +94,15 @@ final class SkyloomForm extends StatefulWidget {
   /// Renderer overrides keyed by schema field type.
   final Map<String, SkyloomFieldRenderer> renderers;
   final Map<String, SkyloomValidator> validators;
-  final bool validateOnChange;
+  final SkyloomDependencyCallback? onDependencyChanged;
+  final bool? _validateOnChangeOverride;
+  final SkyloomValidationMode validationMode;
+  bool get validateOnChange =>
+      _validateOnChangeOverride ??
+      validationMode == SkyloomValidationMode.onChange;
+  bool get validateOnBlur =>
+      validationMode == SkyloomValidationMode.onChange ||
+      validationMode == SkyloomValidationMode.onBlur;
   final bool showSubmitButton;
   final String submitButtonLabel;
   final double fieldSpacing;
@@ -128,9 +144,12 @@ final class _SkyloomFormState extends State<SkyloomForm> {
         jsonEncode(oldWidget.initialValues) != jsonEncode(widget.initialValues);
     if (oldWidget.controller != widget.controller ||
         schemaChanged ||
-        initialValuesChanged) {
+        initialValuesChanged ||
+        oldWidget.onDependencyChanged != widget.onDependencyChanged) {
       _detachController();
       _attachController();
+    } else if (_ownsController && oldWidget.validators != widget.validators) {
+      _controller.setValidators(widget.validators);
     }
     if (oldWidget.renderers != widget.renderers) {
       _rendererRegistry = MaterialSkyloomRenderers.defaults(
@@ -147,6 +166,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
           schema: widget.schema,
           initialValues: widget.initialValues,
           validators: widget.validators,
+          onDependencyChanged: widget.onDependencyChanged,
         );
     if (_controller.schema.id != widget.schema.id) {
       throw ArgumentError(
@@ -174,7 +194,49 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   }
 
   Future<void> _submit() async {
-    await _controller.submit(widget.onSubmit);
+    if (widget.validationMode == SkyloomValidationMode.manual) {
+      await _controller.submitWithoutValidation(widget.onSubmit);
+    } else {
+      await _controller.submit(widget.onSubmit);
+    }
+  }
+
+  Widget _buildField(FieldSchema fieldSchema, String parentPath) {
+    final fieldPath = parentPath.isEmpty
+        ? fieldSchema.key
+        : '$parentPath.${fieldSchema.key}';
+    return AnimatedBuilder(
+      animation: _controller.field(fieldPath),
+      builder: (context, _) {
+        final fieldController = _controller.field(fieldPath);
+        if (!fieldController.visible) return const SizedBox.shrink();
+        final renderer = _rendererRegistry.rendererFor(fieldSchema.type);
+        if (renderer == null) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+            child: _UnsupportedFieldType(
+              fieldKey: fieldPath,
+              fieldType: fieldSchema.type,
+            ),
+          );
+        }
+        return Padding(
+          padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+          child: renderer.build(
+            context,
+            SkyloomRendererContext(
+              fieldSchema: fieldSchema,
+              fieldPath: fieldPath,
+              fieldController: fieldController,
+              formController: _controller,
+              buildChild: _buildField,
+              validateOnChange: widget.validateOnChange,
+              validateOnBlur: widget.validateOnBlur,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -184,39 +246,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final fieldSchema in widget.schema.fields)
-            AnimatedBuilder(
-              animation: _controller.field(fieldSchema.key),
-              builder: (context, _) {
-                final fieldController = _controller.field(fieldSchema.key);
-                if (!fieldController.visible) {
-                  return const SizedBox.shrink();
-                }
-                final renderer = _rendererRegistry.rendererFor(
-                  fieldSchema.type,
-                );
-                if (renderer == null) {
-                  return Padding(
-                    padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-                    child: _UnsupportedFieldType(
-                      fieldKey: fieldSchema.key,
-                      fieldType: fieldSchema.type,
-                    ),
-                  );
-                }
-                return Padding(
-                  padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-                  child: renderer.build(
-                    context,
-                    SkyloomRendererContext(
-                      fieldSchema: fieldSchema,
-                      fieldController: fieldController,
-                      formController: _controller,
-                      validateOnChange: widget.validateOnChange,
-                    ),
-                  ),
-                );
-              },
-            ),
+            _buildField(fieldSchema, ''),
           if (widget.showSubmitButton && widget.onSubmit != null)
             AnimatedBuilder(
               animation: _controller,

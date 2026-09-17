@@ -59,7 +59,47 @@ const employeeSchema = <String, Object?>{
       'validation': {'required': true},
     },
     {'key': 'dateOfBirth', 'type': FormType.date, 'label': 'Date of birth'},
-    {'key': 'address.city', 'type': FormType.text, 'label': 'City'},
+    {
+      'key': 'address',
+      'type': FormType.object,
+      'label': 'Address',
+      'fields': [
+        {
+          'key': 'country',
+          'type': FormType.select,
+          'label': 'Country',
+          'options': [
+            {'label': 'India', 'value': 'IN'},
+            {'label': 'United States', 'value': 'US'},
+          ],
+        },
+        {
+          'key': 'state',
+          'type': FormType.text,
+          'label': 'State',
+          'dependsOn': ['country'],
+          'dependencyConfig': {
+            'clearOnChange': true,
+            'reloadDataOnChange': true,
+          },
+        },
+        {'key': 'city', 'type': FormType.text, 'label': 'City'},
+      ],
+    },
+    {
+      'key': 'emergencyContacts',
+      'type': FormType.array,
+      'label': 'Emergency contacts',
+      'minItems': 1,
+      'maxItems': 3,
+      'items': {
+        'type': FormType.object,
+        'fields': [
+          {'key': 'name', 'type': FormType.text, 'label': 'Contact name'},
+          {'key': 'phone', 'type': FormType.text, 'label': 'Phone number'},
+        ],
+      },
+    },
     {'key': 'notes', 'type': FormType.textarea, 'label': 'Notes'},
   ],
 };
@@ -100,12 +140,24 @@ class _EmployeeFormPageState extends State<EmployeeFormPage> {
           children: [
             SkyloomForm.fromJson(
               schema: employeeSchema,
+              layout: SkyloomFormLayout.column,
               padding: const EdgeInsets.all(4),
               inputDecorationTheme: const InputDecorationTheme(
                 border: OutlineInputBorder(),
               ),
               initialValues: const {
-                'address': {'city': 'Chennai'},
+                'address': {'country': 'IN', 'city': 'Chennai'},
+              },
+              onDependencyChanged: (change) {
+                if (change.configuration.reloadDataOnChange) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Reload options for ${change.dependentKey}',
+                      ),
+                    ),
+                  );
+                }
               },
               onSubmit: (values) {
                 setState(() => _submittedValues = values);

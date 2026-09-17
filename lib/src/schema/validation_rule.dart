@@ -11,5 +11,9 @@ abstract final class ValidationRule {
   static const String url = 'url';
   static const String sameAs = 'sameAs';
   static const String notSameAs = 'notSameAs';
+  static const String greaterThan = 'greaterThan';
+  static const String greaterThanOrEqual = 'greaterThanOrEqual';
+  static const String lessThan = 'lessThan';
+  static const String lessThanOrEqual = 'lessThanOrEqual';
   static const String custom = 'custom';
 }

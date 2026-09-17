@@ -15,6 +15,7 @@ export 'src/renderer/renderer_context.dart';
 export 'src/renderer/skyloom_form.dart';
 export 'src/schema/field_option.dart';
 export 'src/schema/field_schema.dart';
+export 'src/schema/dependency_schema.dart';
 export 'src/schema/form_type.dart';
 export 'src/schema/form_schema.dart';
 export 'src/schema/validation_schema.dart';

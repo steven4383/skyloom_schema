@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../registry/renderer_registry.dart';
+import '../../schema/field_schema.dart';
 import '../../schema/form_type.dart';
+import '../../utils/json_value_utils.dart';
+import '../../utils/path_utils.dart';
 import '../field_renderer.dart';
 import '../renderer_context.dart';
 
@@ -23,9 +26,484 @@ final class MaterialSkyloomRenderers {
       FormType.radio: const MaterialRadioFieldRenderer(),
       FormType.select: const MaterialSelectFieldRenderer(),
       FormType.date: const MaterialDateFieldRenderer(),
+      FormType.object: const MaterialObjectFieldRenderer(),
+      FormType.array: const MaterialArrayFieldRenderer(),
       ...overrides,
     });
   }
+}
+
+/// Renders a nested object as a Material 3 outlined group.
+final class MaterialObjectFieldRenderer implements SkyloomFieldRenderer {
+  const MaterialObjectFieldRenderer();
+
+  @override
+  Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
+    final schema = rendererContext.fieldSchema;
+    return Card.outlined(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (schema.label != null)
+              Text(
+                schema.label!,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            if (schema.description != null) ...[
+              const SizedBox(height: 4),
+              Text(schema.description!),
+            ],
+            if (schema.label != null || schema.description != null)
+              const SizedBox(height: 16),
+            for (final child in schema.fields ?? const <FieldSchema>[])
+              rendererContext.buildChild(child, rendererContext.fieldPath),
+            if (rendererContext.error != null)
+              _ErrorText(rendererContext.error!),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders repeatable primitive, object, and nested-array items.
+final class MaterialArrayFieldRenderer implements SkyloomFieldRenderer {
+  const MaterialArrayFieldRenderer();
+
+  @override
+  Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
+    return _SkyloomArrayField(rendererContext: rendererContext);
+  }
+}
+
+final class _SkyloomArrayField extends StatelessWidget {
+  const _SkyloomArrayField({required this.rendererContext});
+
+  final SkyloomRendererContext rendererContext;
+
+  @override
+  Widget build(BuildContext context) {
+    final schema = rendererContext.fieldSchema;
+    final field = rendererContext.fieldController;
+    final values = field.value is List<Object?>
+        ? field.value! as List<Object?>
+        : const <Object?>[];
+    final editable = field.enabled && !field.readOnly;
+    final canAdd =
+        editable &&
+        (schema.maxItems == null || values.length < schema.maxItems!);
+
+    return Card.outlined(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        schema.label ?? schema.key,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (schema.description != null) Text(schema.description!),
+                    ],
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: canAdd
+                      ? () => rendererContext.formController.addArrayItem(
+                          rendererContext.fieldPath,
+                        )
+                      : null,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add'),
+                ),
+              ],
+            ),
+            if (values.isEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                'No items yet.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+            for (var index = 0; index < values.length; index++) ...[
+              const SizedBox(height: 12),
+              _ArrayItemCard(
+                key: ValueKey('${rendererContext.fieldPath}[$index]'),
+                index: index,
+                count: values.length,
+                schema: schema.items!,
+                value: values[index],
+                enabled: editable,
+                canRemove: values.length > (schema.minItems ?? 0),
+                canDuplicate:
+                    schema.maxItems == null || values.length < schema.maxItems!,
+                onChanged: (value) => _replace(values, index, value),
+                onRemove: () => rendererContext.formController.removeArrayItem(
+                  rendererContext.fieldPath,
+                  index,
+                ),
+                onDuplicate: () => rendererContext.formController
+                    .duplicateArrayItem(rendererContext.fieldPath, index),
+                onMoveUp: index == 0
+                    ? null
+                    : () => rendererContext.formController.reorderArrayItem(
+                        rendererContext.fieldPath,
+                        index,
+                        index - 1,
+                      ),
+                onMoveDown: index == values.length - 1
+                    ? null
+                    : () => rendererContext.formController.reorderArrayItem(
+                        rendererContext.fieldPath,
+                        index,
+                        index + 1,
+                      ),
+              ),
+            ],
+            if (rendererContext.error != null) ...[
+              const SizedBox(height: 8),
+              _ErrorText(rendererContext.error!),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _replace(List<Object?> current, int index, Object? value) {
+    final next = thawJsonValue(current)! as List<Object?>;
+    next[index] = value;
+    rendererContext.setValue(next);
+  }
+}
+
+final class _ArrayItemCard extends StatelessWidget {
+  const _ArrayItemCard({
+    required this.index,
+    required this.count,
+    required this.schema,
+    required this.value,
+    required this.enabled,
+    required this.canRemove,
+    required this.canDuplicate,
+    required this.onChanged,
+    required this.onRemove,
+    required this.onDuplicate,
+    required this.onMoveUp,
+    required this.onMoveDown,
+    super.key,
+  });
+
+  final int index;
+  final int count;
+  final FieldSchema schema;
+  final Object? value;
+  final bool enabled;
+  final bool canRemove;
+  final bool canDuplicate;
+  final ValueChanged<Object?> onChanged;
+  final VoidCallback onRemove;
+  final VoidCallback onDuplicate;
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text('Item ${index + 1}')),
+                IconButton(
+                  tooltip: 'Move item up',
+                  onPressed: enabled ? onMoveUp : null,
+                  icon: const Icon(Icons.arrow_upward),
+                ),
+                IconButton(
+                  tooltip: 'Move item down',
+                  onPressed: enabled ? onMoveDown : null,
+                  icon: const Icon(Icons.arrow_downward),
+                ),
+                IconButton(
+                  tooltip: 'Duplicate item',
+                  onPressed: enabled && canDuplicate ? onDuplicate : null,
+                  icon: const Icon(Icons.copy_outlined),
+                ),
+                IconButton(
+                  tooltip: 'Remove item',
+                  onPressed: enabled && canRemove ? onRemove : null,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _ArrayItemEditor(
+              schema: schema,
+              value: value,
+              enabled: enabled,
+              path: 'item-$index',
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _ArrayItemEditor extends StatelessWidget {
+  const _ArrayItemEditor({
+    required this.schema,
+    required this.value,
+    required this.enabled,
+    required this.path,
+    required this.onChanged,
+  });
+
+  final FieldSchema schema;
+  final Object? value;
+  final bool enabled;
+  final String path;
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (schema.type == FormType.object) {
+      final object = value is Map<String, Object?>
+          ? value! as Map<String, Object?>
+          : <String, Object?>{};
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final child in schema.fields ?? const <FieldSchema>[]) ...[
+            _ArrayItemEditor(
+              schema: child,
+              value: PathUtils.getValue(object, child.key),
+              enabled: enabled && !child.disabled && !child.readOnly,
+              path: '$path.${child.key}',
+              onChanged: (childValue) {
+                final next = thawJsonValue(object)! as Map<String, Object?>;
+                PathUtils.setValue(next, child.key, childValue);
+                onChanged(next);
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      );
+    }
+    if (schema.type == FormType.array) {
+      final items = value is List<Object?>
+          ? value! as List<Object?>
+          : const <Object?>[];
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (schema.label != null)
+            Text(schema.label!, style: Theme.of(context).textTheme.titleSmall),
+          for (var index = 0; index < items.length; index++)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _ArrayItemEditor(
+                      schema: schema.items!,
+                      value: items[index],
+                      enabled: enabled,
+                      path: '$path[$index]',
+                      onChanged: (itemValue) {
+                        final next = thawJsonValue(items)! as List<Object?>;
+                        next[index] = itemValue;
+                        onChanged(next);
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove nested item',
+                    onPressed: enabled && items.length > (schema.minItems ?? 0)
+                        ? () {
+                            final next = thawJsonValue(items)! as List<Object?>;
+                            next.removeAt(index);
+                            onChanged(next);
+                          }
+                        : null,
+                    icon: const Icon(Icons.remove_circle_outline),
+                  ),
+                ],
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed:
+                  enabled &&
+                      (schema.maxItems == null ||
+                          items.length < schema.maxItems!)
+                  ? () => onChanged([
+                      ...items.map(thawJsonValue),
+                      _defaultValue(schema.items!),
+                    ])
+                  : null,
+              icon: const Icon(Icons.add),
+              label: const Text('Add nested item'),
+            ),
+          ),
+        ],
+      );
+    }
+    if (schema.type == FormType.checkbox ||
+        schema.type == FormType.switchField) {
+      return SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(schema.label ?? schema.key),
+        value: value == true,
+        onChanged: enabled ? onChanged : null,
+      );
+    }
+    if (schema.type == FormType.select || schema.type == FormType.radio) {
+      final options = schema.options ?? const [];
+      return DropdownButtonFormField<Object?>(
+        key: ValueKey('$path:$value'),
+        initialValue: options.any((option) => option.value == value)
+            ? value
+            : null,
+        decoration: InputDecoration(
+          labelText: schema.label,
+          helperText: schema.helperText ?? schema.description,
+        ),
+        items: [
+          for (final option in options)
+            DropdownMenuItem(value: option.value, child: Text(option.label)),
+        ],
+        onChanged: enabled ? onChanged : null,
+      );
+    }
+    return _InlineTextEditor(
+      key: ValueKey(path),
+      schema: schema,
+      value: value,
+      enabled: enabled,
+      onChanged: onChanged,
+    );
+  }
+}
+
+final class _InlineTextEditor extends StatefulWidget {
+  const _InlineTextEditor({
+    required this.schema,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+    super.key,
+  });
+
+  final FieldSchema schema;
+  final Object? value;
+  final bool enabled;
+  final ValueChanged<Object?> onChanged;
+
+  @override
+  State<_InlineTextEditor> createState() => _InlineTextEditorState();
+}
+
+final class _InlineTextEditorState extends State<_InlineTextEditor> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value?.toString() ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineTextEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = widget.value?.toString() ?? '';
+    if (_controller.text != next) {
+      _controller.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textarea = widget.schema.type == FormType.textarea;
+    return TextField(
+      controller: _controller,
+      enabled: widget.enabled,
+      obscureText: widget.schema.type == FormType.password,
+      keyboardType: widget.schema.type == FormType.number
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : widget.schema.type == FormType.email
+          ? TextInputType.emailAddress
+          : textarea
+          ? TextInputType.multiline
+          : TextInputType.text,
+      minLines: textarea ? 3 : 1,
+      maxLines: textarea ? 6 : 1,
+      decoration: InputDecoration(
+        labelText: widget.schema.label,
+        hintText: widget.schema.placeholder,
+        helperText: widget.schema.helperText ?? widget.schema.description,
+      ),
+      onChanged: (text) {
+        if (widget.schema.type == FormType.number) {
+          widget.onChanged(
+            text.trim().isEmpty
+                ? null
+                : int.tryParse(text) ?? double.tryParse(text) ?? text,
+          );
+        } else {
+          widget.onChanged(text);
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+Object? _defaultValue(FieldSchema schema) {
+  if (schema.hasDefaultValue) return thawJsonValue(schema.defaultValue);
+  if (schema.type == FormType.object) {
+    final result = <String, Object?>{};
+    for (final child in schema.fields ?? const <FieldSchema>[]) {
+      PathUtils.setValue(result, child.key, _defaultValue(child));
+    }
+    return result;
+  }
+  if (schema.type == FormType.array) {
+    return <Object?>[
+      for (var index = 0; index < (schema.minItems ?? 0); index++)
+        schema.hasDefaultItem
+            ? thawJsonValue(schema.defaultItem)
+            : _defaultValue(schema.items!),
+    ];
+  }
+  return null;
 }
 
 final class MaterialTextFieldRenderer implements SkyloomFieldRenderer {
@@ -84,7 +562,7 @@ final class _SkyloomTextFieldState extends State<_SkyloomTextField> {
   void _handleFocusChanged() {
     final field = widget.rendererContext.fieldController;
     field.setFocused(_focusNode.hasFocus);
-    if (!_focusNode.hasFocus) {
+    if (!_focusNode.hasFocus && widget.rendererContext.validateOnBlur) {
       widget.rendererContext.formController.validateField(field.key);
     }
   }

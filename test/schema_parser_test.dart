@@ -194,5 +194,98 @@ void main() {
         throwsUnsupportedError,
       );
     });
+
+    test('parses and round trips nested objects, arrays, and dependencies', () {
+      final source = {
+        'schemaVersion': '1.0',
+        'id': 'team',
+        'fields': [
+          {
+            'key': 'company',
+            'type': FormType.object,
+            'fields': [
+              {
+                'key': 'address',
+                'type': FormType.object,
+                'fields': [
+                  {'key': 'country', 'type': FormType.text},
+                ],
+              },
+            ],
+          },
+          {
+            'key': 'employees',
+            'type': FormType.array,
+            'minItems': 1,
+            'maxItems': 3,
+            'defaultItem': {'name': 'New employee'},
+            'items': {
+              'type': FormType.object,
+              'fields': [
+                {'key': 'name', 'type': FormType.text},
+                {
+                  'key': 'skills',
+                  'type': FormType.array,
+                  'items': {'type': FormType.text},
+                },
+              ],
+            },
+          },
+          {
+            'key': 'state',
+            'type': FormType.select,
+            'dependsOn': ['company.address.country'],
+            'dependencyConfig': {
+              'clearOnChange': true,
+              'reloadDataOnChange': true,
+            },
+          },
+        ],
+      };
+
+      final schema = parser.parse(source);
+      final employees = schema.fields[1];
+
+      expect(schema.fields.first.fields!.single.fields!.single.key, 'country');
+      expect(employees.items!.hasExplicitKey, isFalse);
+      expect(employees.items!.fields![1].items!.type, FormType.text);
+      expect(employees.minItems, 1);
+      expect(schema.fields.last.dependency.clearOnChange, isTrue);
+      expect(schema.fields.last.dependency.reloadDataOnChange, isTrue);
+      expect(parser.parse(schema.toJson()).toJson(), source);
+    });
+
+    test('rejects incomplete or invalid object and array schemas', () {
+      expect(
+        () => parser.parse({
+          'id': 'bad_object',
+          'fields': [
+            {'key': 'address', 'type': FormType.object},
+          ],
+        }),
+        throwsA(
+          isA<SchemaParseException>().having(
+            (error) => error.path,
+            'path',
+            r'$.fields[0].fields',
+          ),
+        ),
+      );
+      expect(
+        () => parser.parse({
+          'id': 'bad_array',
+          'fields': [
+            {
+              'key': 'items',
+              'type': FormType.array,
+              'minItems': 2,
+              'maxItems': 1,
+              'items': {'type': FormType.text},
+            },
+          ],
+        }),
+        throwsA(isA<SchemaParseException>()),
+      );
+    });
   });
 }

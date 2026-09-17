@@ -5,15 +5,20 @@ import '../utils/json_value_utils.dart';
 
 /// Reactive state for one schema field.
 final class SkyloomFieldController extends ChangeNotifier {
-  SkyloomFieldController({required this.schema, Object? initialValue})
-    : _initialValue = freezeJsonValue(initialValue, path: r'$.initialValue'),
-      _value = freezeJsonValue(initialValue, path: r'$.value'),
-      _visible = !schema.hidden,
-      _enabled = !schema.disabled,
-      _readOnly = schema.readOnly,
-      _required = schema.required;
+  SkyloomFieldController({
+    required this.schema,
+    String? key,
+    Object? initialValue,
+  }) : _key = key ?? schema.key,
+       _initialValue = freezeJsonValue(initialValue, path: r'$.initialValue'),
+       _value = freezeJsonValue(initialValue, path: r'$.value'),
+       _visible = !schema.hidden,
+       _enabled = !schema.disabled,
+       _readOnly = schema.readOnly,
+       _required = schema.required;
 
   final FieldSchema schema;
+  final String _key;
   Object? _initialValue;
   Object? _value;
   String? _error;
@@ -25,7 +30,7 @@ final class SkyloomFieldController extends ChangeNotifier {
   bool _readOnly;
   bool _required;
 
-  String get key => schema.key;
+  String get key => _key;
   Object? get value => _value;
   Object? get initialValue => _initialValue;
   String? get error => _error;

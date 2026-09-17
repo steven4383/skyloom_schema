@@ -167,7 +167,9 @@ void main() {
     expect(find.text('Date'), findsOneWidget);
   });
 
-  testWidgets('supports outlined inputs and scrolls large forms', (tester) async {
+  testWidgets('supports outlined inputs and scrolls large forms', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(400, 300));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -203,8 +205,122 @@ void main() {
     expect(find.byType(SingleChildScrollView), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -500));
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -500),
+    );
     await tester.pump();
     expect(find.text('Field 10'), findsOneWidget);
+  });
+
+  testWidgets('manual validation mode submits without automatic validation', (
+    tester,
+  ) async {
+    var submitted = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: schema,
+            validationMode: SkyloomValidationMode.manual,
+            onSubmit: (_) => submitted = true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.pump();
+
+    expect(submitted, isTrue);
+    expect(find.text('Email is required.'), findsNothing);
+  });
+
+  testWidgets('renders and edits deeply nested object fields', (tester) async {
+    final parsed = const SchemaParser().parse({
+      'id': 'nested_ui',
+      'fields': [
+        {
+          'key': 'address',
+          'type': FormType.object,
+          'label': 'Address',
+          'fields': [
+            {'key': 'city', 'type': FormType.text, 'label': 'City'},
+          ],
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: parsed);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm(
+            schema: parsed,
+            controller: controller,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Address'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Chennai');
+    expect(controller.value('address.city'), 'Chennai');
+    expect(controller.values, {
+      'address': {'city': 'Chennai'},
+    });
+  });
+
+  testWidgets('renders array controls and edits object-array values', (
+    tester,
+  ) async {
+    final parsed = const SchemaParser().parse({
+      'id': 'array_ui',
+      'fields': [
+        {
+          'key': 'employees',
+          'type': FormType.array,
+          'label': 'Employees',
+          'minItems': 1,
+          'items': {
+            'type': FormType.object,
+            'fields': [
+              {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+            ],
+          },
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: parsed);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm(
+            schema: parsed,
+            controller: controller,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Item 1'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'Steven');
+    expect(controller.value('employees'), [
+      {'name': 'Steven'},
+    ]);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pump();
+    expect(find.text('Item 2'), findsOneWidget);
+    expect((controller.value('employees')! as List<Object?>), hasLength(2));
+
+    await tester.tap(find.byTooltip('Duplicate item').first);
+    await tester.pump();
+    expect((controller.value('employees')! as List<Object?>), hasLength(3));
   });
 }
