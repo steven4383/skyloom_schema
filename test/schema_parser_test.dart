@@ -21,6 +21,18 @@ void main() {
       expect(schema.fields.single.type, 'text');
     });
 
+    test('accepts FormType constants as JSON-compatible strings', () {
+      final schema = parser.parse({
+        'id': 'typed_fields',
+        'fields': [
+          {'key': 'name', 'type': FormType.text},
+          {'key': 'enabled', 'type': FormType.switchField},
+        ],
+      });
+
+      expect(schema.fields.map((field) => field.type), ['text', 'switch']);
+    });
+
     test('parses common properties, options, validation, and metadata', () {
       final schema = parser.parse({
         'schemaVersion': '1.0',
@@ -137,6 +149,28 @@ void main() {
           ],
         }),
         throwsA(isA<SchemaParseException>()),
+      );
+    });
+
+    test('reports the exact path of a non-JSON field value', () {
+      expect(
+        () => parser.parse({
+          'id': 'invalid_default',
+          'fields': [
+            {
+              'key': 'createdAt',
+              'type': 'date',
+              'defaultValue': DateTime(2026),
+            },
+          ],
+        }),
+        throwsA(
+          isA<SchemaParseException>().having(
+            (error) => error.path,
+            'path',
+            r'$.fields[0].defaultValue',
+          ),
+        ),
       );
     });
 

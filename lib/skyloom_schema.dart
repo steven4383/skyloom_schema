@@ -1,10 +1,22 @@
 /// Schema models and parsing utilities for building dynamic Flutter forms.
 library;
 
+export 'src/controller/field_controller.dart';
+export 'src/controller/form_controller.dart';
+export 'src/engine/condition_engine.dart';
+export 'src/engine/validation_engine.dart';
+export 'src/engine/validation_mode.dart';
 export 'src/errors/schema_parse_exception.dart';
 export 'src/parser/schema_parser.dart';
+export 'src/registry/renderer_registry.dart';
+export 'src/renderer/field_renderer.dart';
+export 'src/renderer/material/material_renderers.dart';
+export 'src/renderer/renderer_context.dart';
+export 'src/renderer/skyloom_form.dart';
 export 'src/schema/field_option.dart';
 export 'src/schema/field_schema.dart';
+export 'src/schema/form_type.dart';
 export 'src/schema/form_schema.dart';
 export 'src/schema/validation_schema.dart';
+export 'src/schema/validation_rule.dart';
 export 'src/utils/path_utils.dart';

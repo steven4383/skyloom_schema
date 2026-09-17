@@ -85,15 +85,20 @@ final class SchemaParser {
     ValidationSchema? validation;
     if (json['validation'] != null) {
       final rules = _object(json['validation'], '$path.validation');
-      for (final key in rules.keys) {
-        if (key.trim().isEmpty) {
+      final frozenRules = <String, Object?>{};
+      for (final entry in rules.entries) {
+        if (entry.key.trim().isEmpty) {
           throw SchemaParseException(
             'Validation rule names cannot be empty.',
             path: '$path.validation',
           );
         }
+        frozenRules[entry.key] = freezeJsonValue(
+          entry.value,
+          path: '$path.validation.${entry.key}',
+        );
       }
-      validation = ValidationSchema(rules);
+      validation = ValidationSchema(frozenRules);
     }
 
     return FieldSchema(
@@ -103,7 +108,9 @@ final class SchemaParser {
       description: _optionalString(json, 'description', '$path.description'),
       helperText: _optionalString(json, 'helperText', '$path.helperText'),
       placeholder: _optionalString(json, 'placeholder', '$path.placeholder'),
-      defaultValue: json['defaultValue'],
+      defaultValue: json.containsKey('defaultValue')
+          ? freezeJsonValue(json['defaultValue'], path: '$path.defaultValue')
+          : null,
       hasDefaultValue: json.containsKey('defaultValue'),
       required: _optionalBool(json, 'required', '$path.required'),
       disabled: _optionalBool(json, 'disabled', '$path.disabled'),
@@ -141,7 +148,7 @@ final class SchemaParser {
     }
     return FieldOption(
       label: _requiredString(json, 'label', '$path.label'),
-      value: json['value'],
+      value: freezeJsonValue(json['value'], path: '$path.value'),
       metadata: _optionalObject(json, 'metadata', '$path.metadata'),
       additionalProperties: _additionalProperties(json, const {
         'label',
@@ -215,7 +222,8 @@ final class SchemaParser {
     if (!json.containsKey(key)) {
       return const {};
     }
-    return _object(json[key], path);
+    final value = _object(json[key], path);
+    return freezeJsonValue(value, path: path)! as Map<String, Object?>;
   }
 
   Map<String, Object?> _additionalProperties(

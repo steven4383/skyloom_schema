@@ -1,7 +1,6 @@
 name: skyloom_schema
 description: A headless-first, schema-driven form engine for Flutter.
-version: 0.0.1
-homepage: https://github.com/skyloom/skyloom_schema
+version: 0.1.0
 
 environment:
   sdk: ^3.12.0
