@@ -1,5 +1,7 @@
 import '../utils/json_value_utils.dart';
 import 'field_schema.dart';
+import 'section_schema.dart';
+import 'ui_schema.dart';
 
 /// Immutable, parsed definition of a Skyloom form.
 final class FormSchema {
@@ -9,9 +11,13 @@ final class FormSchema {
     this.schemaVersion = '1.0',
     this.title,
     this.description,
+    Map<String, FieldUiSchema> uiSchema = const {},
+    List<SectionSchema> sections = const [],
     Map<String, Object?> metadata = const {},
     Map<String, Object?> additionalProperties = const {},
   }) : fields = List<FieldSchema>.unmodifiable(fields),
+       uiSchema = Map<String, FieldUiSchema>.unmodifiable(uiSchema),
+       sections = List<SectionSchema>.unmodifiable(sections),
        metadata = _freezeMap(metadata, r'$.metadata'),
        additionalProperties = _freezeMap(additionalProperties, r'$');
 
@@ -20,6 +26,8 @@ final class FormSchema {
   final String? title;
   final String? description;
   final List<FieldSchema> fields;
+  final Map<String, FieldUiSchema> uiSchema;
+  final List<SectionSchema> sections;
   final Map<String, Object?> metadata;
 
   /// Properties preserved for forward compatibility but not interpreted yet.
@@ -33,6 +41,10 @@ final class FormSchema {
       if (title != null) 'title': title,
       if (description != null) 'description': description,
       'fields': fields.map((field) => field.toJson()).toList(),
+      if (uiSchema.isNotEmpty)
+        'uiSchema': uiSchema.map((key, value) => MapEntry(key, value.toJson())),
+      if (sections.isNotEmpty)
+        'sections': sections.map((section) => section.toJson()).toList(),
       if (metadata.isNotEmpty) 'metadata': _thawMap(metadata),
     };
   }

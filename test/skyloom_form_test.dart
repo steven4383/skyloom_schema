@@ -319,8 +319,131 @@ void main() {
     expect(find.text('Item 2'), findsOneWidget);
     expect((controller.value('employees')! as List<Object?>), hasLength(2));
 
-    await tester.tap(find.byTooltip('Duplicate item').first);
+    await tester.enterText(find.byType(TextField).last, 'Alex');
+    await tester.tap(find.byTooltip('Move item down').first);
+    await tester.pump();
+    expect(controller.value('employees'), [
+      {'name': 'Alex'},
+      {'name': 'Steven'},
+    ]);
+
+    await tester.tap(find.byTooltip('Move item up').last);
+    await tester.pump();
+    expect(controller.value('employees'), [
+      {'name': 'Steven'},
+      {'name': 'Alex'},
+    ]);
+
+    await tester.tap(find.byTooltip('More item actions').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Duplicate'));
     await tester.pump();
     expect((controller.value('employees')! as List<Object?>), hasLength(3));
+  });
+
+  testWidgets('loads and selects options from an async data source', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'async_select',
+              'fields': [
+                {
+                  'key': 'employee',
+                  'type': FormType.select,
+                  'label': 'Employee',
+                  'dataSource': {'handler': 'employees'},
+                },
+              ],
+            },
+            dataSources: {
+              'employees': (request) => SkyloomDataSourceResult(
+                options: [
+                  FieldOption(label: 'Steven', value: 'steven'),
+                  FieldOption(label: 'Alex', value: 'alex'),
+                ],
+              ),
+            },
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(TextFormField));
+    await tester.pumpAndSettle();
+    expect(find.text('Steven'), findsOneWidget);
+
+    await tester.tap(find.text('Steven'));
+    await tester.pumpAndSettle();
+    expect(find.text('Steven'), findsOneWidget);
+  });
+
+  testWidgets('uses responsive spans and collapsible form sections', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'responsive_sections',
+              'fields': [
+                {'key': 'firstName', 'type': FormType.text, 'label': 'First'},
+                {'key': 'lastName', 'type': FormType.text, 'label': 'Last'},
+                {
+                  'key': 'unconfigured',
+                  'type': FormType.text,
+                  'label': 'Unconfigured',
+                },
+              ],
+              'uiSchema': {
+                'firstName': {
+                  'layout': {'desktop': 6},
+                  'order': 1,
+                },
+                'lastName': {
+                  'layout': {'desktop': 6},
+                  'order': 2,
+                },
+              },
+              'sections': [
+                {
+                  'id': 'identity',
+                  'title': 'Identity',
+                  'fields': ['unconfigured', 'lastName', 'firstName'],
+                  'collapsible': true,
+                  'defaultExpanded': false,
+                },
+              ],
+            },
+            layout: SkyloomFormLayout.column,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Identity'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.text('Identity'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsNWidgets(3));
+    expect(
+      tester
+          .widgetList<TextField>(find.byType(TextField))
+          .map((field) => field.decoration?.labelText),
+      ['First', 'Last', 'Unconfigured'],
+    );
+    final firstWidth = tester.getSize(find.byType(TextField).first).width;
+    expect(firstWidth, closeTo(572, 30));
   });
 }

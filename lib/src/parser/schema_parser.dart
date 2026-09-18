@@ -1,10 +1,14 @@
 import '../errors/schema_parse_exception.dart';
 import '../schema/dependency_schema.dart';
+import '../schema/data_source_schema.dart';
+import '../schema/async_validation_schema.dart';
 import '../schema/field_option.dart';
 import '../schema/field_schema.dart';
 import '../schema/form_type.dart';
 import '../schema/form_schema.dart';
 import '../schema/validation_schema.dart';
+import '../schema/ui_schema.dart';
+import '../schema/section_schema.dart';
 import '../utils/json_value_utils.dart';
 
 /// Parses and validates JSON-compatible Skyloom form definitions.
@@ -26,6 +30,17 @@ final class SchemaParser {
     }
 
     final fields = _parseFields(fieldsValue, r'$.fields');
+    final uiSchema = _parseUiSchema(json['uiSchema'], r'$.uiSchema');
+    final rootFieldKeys = fields.map((field) => field.key).toSet();
+    for (final fieldKey in uiSchema.keys) {
+      if (!rootFieldKeys.contains(fieldKey)) {
+        throw SchemaParseException(
+          'UI schema references unknown root field "$fieldKey".',
+          path: r'$.uiSchema',
+        );
+      }
+    }
+    final sections = _parseSections(json['sections'], r'$.sections', fields);
 
     return FormSchema(
       id: _requiredString(json, 'id', r'$.id'),
@@ -34,6 +49,8 @@ final class SchemaParser {
       title: _optionalString(json, 'title', r'$.title'),
       description: _optionalString(json, 'description', r'$.description'),
       fields: fields,
+      uiSchema: uiSchema,
+      sections: sections,
       metadata: _optionalObject(json, 'metadata', r'$.metadata'),
       additionalProperties: _additionalProperties(json, const {
         'schemaVersion',
@@ -42,6 +59,8 @@ final class SchemaParser {
         'description',
         'fields',
         'metadata',
+        'uiSchema',
+        'sections',
       }, r'$'),
     );
   }
@@ -165,6 +184,97 @@ final class SchemaParser {
       );
     }
 
+    DataSourceSchema? dataSource;
+    if (json.containsKey('dataSource')) {
+      final config = _object(json['dataSource'], '$path.dataSource');
+      final pageSize =
+          _optionalInt(config, 'pageSize', '$path.dataSource.pageSize') ?? 20;
+      final debounce =
+          _optionalInt(
+            config,
+            'debounceMilliseconds',
+            '$path.dataSource.debounceMilliseconds',
+          ) ??
+          300;
+      if (pageSize <= 0 || debounce < 0) {
+        throw SchemaParseException(
+          'Data-source page size must be positive and debounce cannot be negative.',
+          path: '$path.dataSource',
+        );
+      }
+      dataSource = DataSourceSchema(
+        handler: _requiredString(config, 'handler', '$path.dataSource.handler'),
+        search: _optionalBoolDefault(
+          config,
+          'search',
+          '$path.dataSource.search',
+          defaultValue: true,
+        ),
+        pageSize: pageSize,
+        debounceMilliseconds: debounce,
+        cache: _optionalBoolDefault(
+          config,
+          'cache',
+          '$path.dataSource.cache',
+          defaultValue: true,
+        ),
+        labelField: config.containsKey('mapping')
+            ? _requiredString(
+                _object(config['mapping'], '$path.dataSource.mapping'),
+                'label',
+                '$path.dataSource.mapping.label',
+              )
+            : 'label',
+        valueField: config.containsKey('mapping')
+            ? _requiredString(
+                _object(config['mapping'], '$path.dataSource.mapping'),
+                'value',
+                '$path.dataSource.mapping.value',
+              )
+            : 'value',
+        metadataField: config.containsKey('mapping')
+            ? _optionalString(
+                    _object(config['mapping'], '$path.dataSource.mapping'),
+                    'metadata',
+                    '$path.dataSource.mapping.metadata',
+                  ) ??
+                  'metadata'
+            : 'metadata',
+      );
+    }
+
+    AsyncValidationSchema? asyncValidation;
+    if (json.containsKey('asyncValidation')) {
+      final config = _object(json['asyncValidation'], '$path.asyncValidation');
+      final debounce =
+          _optionalInt(
+            config,
+            'debounceMilliseconds',
+            '$path.asyncValidation.debounceMilliseconds',
+          ) ??
+          300;
+      if (debounce < 0) {
+        throw SchemaParseException(
+          'Async-validation debounce cannot be negative.',
+          path: '$path.asyncValidation.debounceMilliseconds',
+        );
+      }
+      asyncValidation = AsyncValidationSchema(
+        handler: _requiredString(
+          config,
+          'handler',
+          '$path.asyncValidation.handler',
+        ),
+        debounceMilliseconds: debounce,
+        cache: _optionalBoolDefault(
+          config,
+          'cache',
+          '$path.asyncValidation.cache',
+          defaultValue: true,
+        ),
+      );
+    }
+
     final optionsValue = json['options'];
     List<FieldOption>? options;
     if (optionsValue != null) {
@@ -226,6 +336,8 @@ final class SchemaParser {
       hasDefaultItem: json.containsKey('defaultItem'),
       dependsOn: dependsOn,
       dependency: dependency,
+      dataSource: dataSource,
+      asyncValidation: asyncValidation,
       validation: validation,
       metadata: _optionalObject(json, 'metadata', '$path.metadata'),
       additionalProperties: _additionalProperties(json, const {
@@ -248,9 +360,148 @@ final class SchemaParser {
         'defaultItem',
         'dependsOn',
         'dependencyConfig',
+        'dataSource',
+        'asyncValidation',
         'validation',
         'metadata',
       }, path),
+    );
+  }
+
+  Map<String, FieldUiSchema> _parseUiSchema(Object? source, String path) {
+    if (source == null) return const {};
+    final json = _object(source, path);
+    return json.map((fieldKey, value) {
+      final fieldPath = '$path.$fieldKey';
+      final config = _object(value, fieldPath);
+      var layout = const ResponsiveLayoutSchema();
+      if (config.containsKey('layout')) {
+        final layoutJson = _object(config['layout'], '$fieldPath.layout');
+        final mobile = _layoutSpan(
+          layoutJson,
+          'mobile',
+          '$fieldPath.layout.mobile',
+        );
+        final tablet = _layoutSpan(
+          layoutJson,
+          'tablet',
+          '$fieldPath.layout.tablet',
+        );
+        final desktop = _layoutSpan(
+          layoutJson,
+          'desktop',
+          '$fieldPath.layout.desktop',
+        );
+        layout = ResponsiveLayoutSchema(
+          mobile: mobile,
+          tablet: tablet,
+          desktop: desktop,
+        );
+      }
+      return MapEntry(
+        fieldKey,
+        FieldUiSchema(
+          widget: _optionalString(config, 'widget', '$fieldPath.widget'),
+          layout: layout,
+          order: _optionalInt(config, 'order', '$fieldPath.order'),
+          group: _optionalString(config, 'group', '$fieldPath.group'),
+          visualHints: _optionalObject(
+            config,
+            'visualHints',
+            '$fieldPath.visualHints',
+          ),
+        ),
+      );
+    });
+  }
+
+  int _layoutSpan(Map<String, Object?> json, String key, String path) {
+    final value = _optionalInt(json, key, path) ?? 12;
+    if (value < 1 || value > 12) {
+      throw SchemaParseException(
+        'Layout spans must be between 1 and 12.',
+        path: path,
+      );
+    }
+    return value;
+  }
+
+  List<SectionSchema> _parseSections(
+    Object? source,
+    String path,
+    List<FieldSchema> fields,
+  ) {
+    if (source == null) return const [];
+    if (source is! List<Object?>) {
+      throw SchemaParseException(
+        'Property "sections" must be an array.',
+        path: path,
+      );
+    }
+    final fieldKeys = fields.map((field) => field.key).toSet();
+    final ids = <String>{};
+    final assignedFields = <String>{};
+    return <SectionSchema>[
+      for (var index = 0; index < source.length; index++)
+        _parseSection(
+          source[index],
+          '$path[$index]',
+          fieldKeys,
+          ids,
+          assignedFields,
+        ),
+    ];
+  }
+
+  SectionSchema _parseSection(
+    Object? source,
+    String path,
+    Set<String> fieldKeys,
+    Set<String> ids,
+    Set<String> assignedFields,
+  ) {
+    final json = _object(source, path);
+    final id = _requiredString(json, 'id', '$path.id');
+    if (!ids.add(id)) {
+      throw SchemaParseException(
+        'Section id "$id" is duplicated.',
+        path: '$path.id',
+      );
+    }
+    final fields = _stringList(json, 'fields', '$path.fields');
+    if (!json.containsKey('fields')) {
+      throw SchemaParseException(
+        'Required property "fields" must be an array.',
+        path: '$path.fields',
+      );
+    }
+    for (final field in fields) {
+      if (!fieldKeys.contains(field)) {
+        throw SchemaParseException(
+          'Section references unknown root field "$field".',
+          path: '$path.fields',
+        );
+      }
+      if (!assignedFields.add(field)) {
+        throw SchemaParseException(
+          'Field "$field" belongs to more than one section.',
+          path: '$path.fields',
+        );
+      }
+    }
+    return SectionSchema(
+      id: id,
+      title: _optionalString(json, 'title', '$path.title'),
+      description: _optionalString(json, 'description', '$path.description'),
+      fields: fields,
+      collapsible: _optionalBool(json, 'collapsible', '$path.collapsible'),
+      defaultExpanded: _optionalBoolDefault(
+        json,
+        'defaultExpanded',
+        '$path.defaultExpanded',
+        defaultValue: true,
+      ),
+      order: _optionalInt(json, 'order', '$path.order') ?? 0,
     );
   }
 

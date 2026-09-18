@@ -8,7 +8,7 @@ while keeping rendering replaceable.
 
 ## Project status
 
-The package is currently at version `0.6.1`.
+The package is currently at version `0.8.1`.
 
 Available now:
 
@@ -36,9 +36,13 @@ Available now:
 - Primitive, object, and nested arrays with add, remove, duplicate, and reorder
 - Array bounds, default items, recursive validation, and JSON output
 - Dependency graphs with clear, preserve, revalidate, and reload hooks
+- Registered async option sources with search, pagination, mapping, and cache
+- Debounced async validation with cancellation and latest-value protection
+- Responsive mobile, tablet, and desktop field spans
+- Ordered and collapsible form sections
 
-Async data, async validation, sections, and multi-step workflows remain on the
-roadmap.
+Multi-step workflows, unified form-level errors, and pre-1.0 performance and
+accessibility hardening remain on the roadmap.
 
 ## How the complete system works
 
@@ -193,7 +197,7 @@ The full foundation contract is documented in the
 
 ## Complete schema and values example
 
-The following example uses APIs available in `0.6.1`. It defines a form,
+The following example uses APIs available in `0.8.1`. It defines a form,
 parses it, creates nested values, and produces JSON-compatible output.
 
 Validation definitions are parsed with the schema and executed when the schema
@@ -613,8 +617,126 @@ Declare dependency edges in the schema:
 When `country` changes, the controller processes `state` and then any fields
 that depend on `state`. Circular graphs and unknown dependency paths are
 rejected. Use `SkyloomForm.onDependencyChanged` or the corresponding
-controller callback to start application-owned data loading; async data-source
-definitions themselves are planned for `0.7.0`.
+controller callback for application-specific side effects. Fields with a
+registered `dataSource` reload automatically when `reloadDataOnChange` is true.
+
+### Async data sources
+
+Reference an application handler without placing network code in JSON:
+
+```dart
+const stateField = {
+  'key': 'state',
+  'type': FormType.select,
+  'dependsOn': ['country'],
+  'dataSource': {
+    'handler': 'states',
+    'pageSize': 20,
+    'debounceMilliseconds': 300,
+    'mapping': {
+      'label': 'displayName',
+      'value': 'code',
+      'metadata': 'metadata',
+    },
+  },
+};
+
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  dataSources: {
+    'states': (request) async {
+      final country = request.dependencyValues['country'];
+      return api.searchStates(
+        country: country,
+        query: request.search,
+        page: request.page,
+        pageSize: request.pageSize,
+      );
+    },
+  },
+);
+```
+
+Handlers may return `SkyloomDataSourceResult`, a list of values/maps, or a map
+containing `items` and `hasMore`. The Material select renderer supplies search,
+debounce, pagination, infinite scrolling, retry, loading, empty, and error
+states. The controller caches results and ignores cancelled or stale requests.
+
+### Async validation
+
+```dart
+const usernameField = {
+  'key': 'username',
+  'type': FormType.text,
+  'asyncValidation': {
+    'handler': 'usernameAvailable',
+    'debounceMilliseconds': 350,
+    'cache': true,
+  },
+};
+
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  asyncValidators: {
+    'usernameAvailable': (value, context) async {
+      final available = await accountApi.isUsernameAvailable('$value');
+      return available ? null : 'This username is already in use.';
+    },
+  },
+);
+```
+
+Async validators expose idle, validating, success, and failure states. Change
+and blur modes debounce validation, stale results cannot overwrite newer
+values, results can be cached, and submission waits for validation to finish.
+
+### Responsive UI schema
+
+Keep layout decisions separate from validation and value structure:
+
+```dart
+const schemaJson = {
+  'id': 'profile',
+  'fields': [
+    {'key': 'firstName', 'type': FormType.text},
+    {'key': 'lastName', 'type': FormType.text},
+  ],
+  'uiSchema': {
+    'firstName': {
+      'layout': {'mobile': 12, 'tablet': 6, 'desktop': 6},
+      'order': 1,
+    },
+    'lastName': {
+      'layout': {'mobile': 12, 'tablet': 6, 'desktop': 6},
+      'order': 2,
+    },
+  },
+};
+```
+
+Each device span uses a twelve-column grid. `widget` can override the renderer
+type, while `group` and `visualHints` remain available to custom renderers and
+the future `skyloom_ui` package.
+
+### Form sections
+
+```dart
+'sections': [
+  {
+    'id': 'identity',
+    'title': 'Identity',
+    'description': 'Basic employee information',
+    'fields': ['firstName', 'lastName'],
+    'collapsible': true,
+    'defaultExpanded': true,
+    'order': 1,
+  },
+]
+```
+
+Fields can belong to at most one section. Unknown field references and
+duplicate section IDs are rejected during parsing. Fields omitted from all
+sections are rendered after the ordered sections.
 
 ## Default Material 3 interface
 
@@ -725,10 +847,11 @@ The current implementation sequence is:
 8. Remaining basic Material fields - complete
 9. Conditional logic and dynamic properties - complete
 10. Nested objects, arrays, and dependencies - complete
-11. Async data and async validation
-12. Layout metadata, sections, and multi-step forms
-13. Performance, accessibility, documentation, and examples
-14. Stable `1.0.0` API
+11. Async data and async validation - complete
+12. Responsive UI metadata and sections - complete
+13. Multi-step forms and unified errors
+14. Performance, accessibility, documentation, and examples
+15. Stable `1.0.0` API
 
 ## Running checks
 

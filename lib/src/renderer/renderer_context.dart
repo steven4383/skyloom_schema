@@ -34,6 +34,7 @@ final class SkyloomRendererContext {
     formController.setValue(fieldPath, value);
     if (validateOnChange) {
       formController.validateField(fieldPath);
+      formController.scheduleAsyncValidation(fieldPath);
     }
   }
 }

@@ -1,3 +1,31 @@
+## 0.8.1
+
+- Add ordered, collapsible form sections with configurable initial expansion.
+- Validate section field membership and render unsectioned fields safely.
+- Flatten nested Material surfaces and add section/object/array dividers.
+- Improve responsive array actions and verify move-up/down behavior.
+- Keep explicitly ordered fields ahead of unordered section fields.
+
+## 0.8.0
+
+- Add separate per-field UI schema with renderer overrides and ordering.
+- Add responsive mobile, tablet, and desktop twelve-column spans.
+- Add responsive Material form layout without coupling layout to data fields.
+
+## 0.7.1
+
+- Add asynchronous validators with debounce, cache, cancellation, and
+  latest-value protection.
+- Add idle, validating, success, and failure validation states.
+- Make form submission await asynchronous validation.
+
+## 0.7.0
+
+- Add registered asynchronous data sources for select fields.
+- Add search, debounce, pagination, infinite loading, retry, empty, error,
+  caching, response mapping, and stale-request protection.
+- Pass dependency values, complete form values, and field metadata to requests.
+
 ## 0.6.1
 
 - Add dependency graphs with cycle detection and relative nested paths.

@@ -1,7 +1,7 @@
 # Skyloom form schema 1.0
 
 This document defines the foundation schema supported by
-`skyloom_schema` 0.6.1. The contract remains forward-compatible: unknown
+`skyloom_schema` 0.8.1. The contract remains forward-compatible: unknown
 properties are preserved during parsing and serialization.
 
 ## Form object
@@ -41,6 +41,8 @@ Common optional properties are:
 - `minItems`, `maxItems`, and `defaultItem` for arrays
 - `dependsOn`, an array of field paths
 - `dependencyConfig`, which configures dependency behavior
+- `dataSource`, which names a registered async option handler
+- `asyncValidation`, which names a registered async validator
 
 The parser preserves unknown properties in `additionalProperties`. This lets a
 consumer safely parse properties introduced by later releases.
@@ -81,6 +83,37 @@ paths inside an object resolve against that object before root paths are tried.
 - `preserveValueIfValid` (default `false`)
 
 Dependency paths must exist and the resulting graph must not contain cycles.
+
+## Async data and validation
+
+`dataSource.handler` names a Dart callback registered on `SkyloomFormController`
+or `SkyloomForm`. Optional properties are `search`, `pageSize`,
+`debounceMilliseconds`, `cache`, and `mapping`. Mapping contains JSON paths for
+`label`, `value`, and `metadata`.
+
+`asyncValidation.handler` similarly names a Dart validation callback. Its
+optional `debounceMilliseconds` and `cache` properties control request timing
+and result reuse. Executable callbacks are never stored in the JSON schema.
+
+## UI schema
+
+The optional root `uiSchema` object is keyed by root field key. Each entry can
+contain:
+
+- `widget`: a renderer-type override
+- `layout`: `mobile`, `tablet`, and `desktop` spans from 1 through 12
+- `order`: an integer display order
+- `group`: an optional group identifier
+- `visualHints`: application or renderer-owned JSON metadata
+
+UI metadata does not affect the form's value structure.
+
+## Sections
+
+The optional root `sections` array groups root fields. Each section requires a
+unique `id` and a `fields` array. It can also define `title`, `description`,
+`collapsible`, `defaultExpanded`, and `order`. A field cannot belong to more
+than one section. Unassigned fields remain valid and render after sections.
 
 ## Field keys and value paths
 

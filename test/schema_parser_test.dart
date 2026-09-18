@@ -287,5 +287,96 @@ void main() {
         throwsA(isA<SchemaParseException>()),
       );
     });
+
+    test('parses async data, async validation, UI schema, and sections', () {
+      final source = {
+        'schemaVersion': '1.0',
+        'id': 'advanced',
+        'fields': [
+          {'key': 'country', 'type': FormType.select},
+          {
+            'key': 'state',
+            'type': FormType.select,
+            'dependsOn': ['country'],
+            'dataSource': {
+              'handler': 'states',
+              'pageSize': 25,
+              'mapping': {
+                'label': 'display.name',
+                'value': 'id',
+                'metadata': 'meta',
+              },
+            },
+            'asyncValidation': {
+              'handler': 'allowedState',
+              'debounceMilliseconds': 200,
+            },
+          },
+        ],
+        'uiSchema': {
+          'country': {
+            'widget': FormType.radio,
+            'layout': {'tablet': 6, 'desktop': 4},
+            'order': 2,
+            'visualHints': {'dense': true},
+          },
+        },
+        'sections': [
+          {
+            'id': 'location',
+            'title': 'Location',
+            'fields': ['country', 'state'],
+            'collapsible': true,
+            'defaultExpanded': false,
+          },
+        ],
+      };
+
+      final schema = parser.parse(source);
+      final state = schema.fields.last;
+
+      expect(state.dataSource!.handler, 'states');
+      expect(state.dataSource!.labelField, 'display.name');
+      expect(state.asyncValidation!.handler, 'allowedState');
+      expect(schema.uiSchema['country']!.layout.desktop, 4);
+      expect(schema.sections.single.defaultExpanded, isFalse);
+      expect(parser.parse(schema.toJson()).toJson(), source);
+    });
+
+    test('rejects invalid spans and duplicate section field membership', () {
+      expect(
+        () => parser.parse({
+          'id': 'bad_layout',
+          'fields': [
+            {'key': 'name', 'type': FormType.text},
+          ],
+          'uiSchema': {
+            'name': {
+              'layout': {'desktop': 13},
+            },
+          },
+        }),
+        throwsA(isA<SchemaParseException>()),
+      );
+      expect(
+        () => parser.parse({
+          'id': 'bad_sections',
+          'fields': [
+            {'key': 'name', 'type': FormType.text},
+          ],
+          'sections': [
+            {
+              'id': 'one',
+              'fields': ['name'],
+            },
+            {
+              'id': 'two',
+              'fields': ['name'],
+            },
+          ],
+        }),
+        throwsA(isA<SchemaParseException>()),
+      );
+    });
   });
 }

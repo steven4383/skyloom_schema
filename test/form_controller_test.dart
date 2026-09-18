@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skyloom_schema/skyloom_schema.dart';
 
@@ -383,4 +385,157 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+
+  test(
+    'loads, maps, paginates, and caches async data-source options',
+    () async {
+      final dataSchema = const SchemaParser().parse({
+        'id': 'data',
+        'fields': [
+          {'key': 'country', 'type': FormType.text},
+          {
+            'key': 'state',
+            'type': FormType.select,
+            'dependsOn': ['country'],
+            'dependencyConfig': {'reloadDataOnChange': true},
+            'dataSource': {
+              'handler': 'states',
+              'pageSize': 1,
+              'mapping': {
+                'label': 'display.name',
+                'value': 'code',
+                'metadata': 'meta',
+              },
+            },
+          },
+        ],
+      });
+      var calls = 0;
+      final requestedCountries = <Object?>[];
+      final controller = SkyloomFormController(
+        schema: dataSchema,
+        initialValues: const {'country': 'IN'},
+        dataSources: {
+          'states': (request) {
+            calls++;
+            requestedCountries.add(request.dependencyValues['country']);
+            return {
+              'items': [
+                {
+                  'display': {
+                    'name': request.page == 1 ? 'Tamil Nadu' : 'Kerala',
+                  },
+                  'code': request.page == 1 ? 'TN' : 'KL',
+                  'meta': {'page': request.page},
+                },
+              ],
+              'hasMore': request.page == 1,
+            };
+          },
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.optionsFor('state').single.label, 'Tamil Nadu');
+      expect(controller.optionsFor('state').single.value, 'TN');
+      expect(controller.optionsFor('state').single.metadata['page'], 1);
+
+      await controller.loadNextOptionsPage('state');
+      expect(controller.optionsFor('state').map((option) => option.value), [
+        'TN',
+        'KL',
+      ]);
+      final callsBeforeCache = calls;
+      await controller.loadOptions('state');
+      expect(calls, callsBeforeCache);
+
+      controller.setValue('country', 'US');
+      await Future<void>.delayed(Duration.zero);
+      expect(requestedCountries, contains('US'));
+    },
+  );
+
+  test('ignores stale data-source responses', () async {
+    final dataSchema = const SchemaParser().parse({
+      'id': 'stale_data',
+      'fields': [
+        {
+          'key': 'search',
+          'type': FormType.select,
+          'dataSource': {'handler': 'search'},
+        },
+      ],
+    });
+    final pending = <Completer<Object?>>[];
+    final controller = SkyloomFormController(schema: dataSchema);
+    addTearDown(controller.dispose);
+    controller.setDataSources({
+      'search': (request) {
+        final completer = Completer<Object?>();
+        pending.add(completer);
+        return completer.future;
+      },
+    });
+    final latestRequest = controller.loadOptions('search', search: 'latest');
+
+    pending[1].complete([
+      {'label': 'Latest', 'value': 'latest'},
+    ]);
+    await latestRequest;
+    pending[0].complete([
+      {'label': 'Old', 'value': 'old'},
+    ]);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.optionsFor('search').single.value, 'latest');
+  });
+
+  test(
+    'async validation ignores stale results and caches latest values',
+    () async {
+      final asyncSchema = const SchemaParser().parse({
+        'id': 'async_validation',
+        'fields': [
+          {
+            'key': 'username',
+            'type': FormType.text,
+            'asyncValidation': {'handler': 'available'},
+          },
+        ],
+      });
+      final pending = <Completer<String?>>[];
+      var calls = 0;
+      final controller = SkyloomFormController(
+        schema: asyncSchema,
+        asyncValidators: {
+          'available': (value, context) {
+            calls++;
+            final completer = Completer<String?>();
+            pending.add(completer);
+            return completer.future;
+          },
+        },
+      );
+      addTearDown(controller.dispose);
+
+      controller.setValue('username', 'old');
+      final oldValidation = controller.validateFieldAsync('username');
+      controller.setValue('username', 'latest');
+      final latestValidation = controller.validateFieldAsync('username');
+
+      pending[1].complete(null);
+      expect(await latestValidation, isTrue);
+      pending[0].complete('Already used.');
+      expect(await oldValidation, isFalse);
+      expect(controller.field('username').error, isNull);
+      expect(
+        controller.asyncValidationStatus('username'),
+        SkyloomAsyncValidationStatus.success,
+      );
+
+      expect(await controller.validateFieldAsync('username'), isTrue);
+      expect(calls, 2);
+    },
+  );
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../registry/renderer_registry.dart';
@@ -33,15 +35,20 @@ final class MaterialSkyloomRenderers {
   }
 }
 
-/// Renders a nested object as a Material 3 outlined group.
+/// Renders a nested object as a quiet Material 3 surface.
 final class MaterialObjectFieldRenderer implements SkyloomFieldRenderer {
   const MaterialObjectFieldRenderer();
 
   @override
   Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
     final schema = rendererContext.fieldSchema;
-    return Card.outlined(
-      margin: EdgeInsets.zero,
+    final fields = schema.fields ?? const <FieldSchema>[];
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -56,10 +63,17 @@ final class MaterialObjectFieldRenderer implements SkyloomFieldRenderer {
               const SizedBox(height: 4),
               Text(schema.description!),
             ],
-            if (schema.label != null || schema.description != null)
+            if (schema.label != null || schema.description != null) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
               const SizedBox(height: 16),
-            for (final child in schema.fields ?? const <FieldSchema>[])
-              rendererContext.buildChild(child, rendererContext.fieldPath),
+            ],
+            for (var index = 0; index < fields.length; index++) ...[
+              rendererContext.buildChild(
+                fields[index],
+                rendererContext.fieldPath,
+              ),
+            ],
             if (rendererContext.error != null)
               _ErrorText(rendererContext.error!),
           ],
@@ -96,8 +110,12 @@ final class _SkyloomArrayField extends StatelessWidget {
         editable &&
         (schema.maxItems == null || values.length < schema.maxItems!);
 
-    return Card.outlined(
-      margin: EdgeInsets.zero,
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -128,15 +146,21 @@ final class _SkyloomArrayField extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
             if (values.isEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                'No items yet.',
-                style: Theme.of(context).textTheme.bodyMedium,
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  'No items yet.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
               ),
             ],
             for (var index = 0; index < values.length; index++) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               _ArrayItemCard(
                 key: ValueKey('${rendererContext.fieldPath}[$index]'),
                 index: index,
@@ -219,39 +243,94 @@ final class _ArrayItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                Expanded(child: Text('Item ${index + 1}')),
-                IconButton(
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: colors.secondaryContainer,
+                  foregroundColor: colors.onSecondaryContainer,
+                  child: Text(
+                    '${index + 1}',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    schema.label ?? 'Item ${index + 1}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                IconButton.filledTonal(
                   tooltip: 'Move item up',
                   onPressed: enabled ? onMoveUp : null,
-                  icon: const Icon(Icons.arrow_upward),
+                  icon: const Icon(Icons.arrow_upward, size: 18),
                 ),
-                IconButton(
+                const SizedBox(width: 4),
+                IconButton.filledTonal(
                   tooltip: 'Move item down',
                   onPressed: enabled ? onMoveDown : null,
-                  icon: const Icon(Icons.arrow_downward),
+                  icon: const Icon(Icons.arrow_downward, size: 18),
                 ),
-                IconButton(
-                  tooltip: 'Duplicate item',
-                  onPressed: enabled && canDuplicate ? onDuplicate : null,
-                  icon: const Icon(Icons.copy_outlined),
-                ),
-                IconButton(
-                  tooltip: 'Remove item',
-                  onPressed: enabled && canRemove ? onRemove : null,
-                  icon: const Icon(Icons.delete_outline),
+                const SizedBox(width: 4),
+                PopupMenuButton<_ArrayItemAction>(
+                  tooltip: 'More item actions',
+                  enabled: enabled,
+                  onSelected: (action) {
+                    switch (action) {
+                      case _ArrayItemAction.duplicate:
+                        onDuplicate();
+                      case _ArrayItemAction.remove:
+                        onRemove();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: _ArrayItemAction.duplicate,
+                      enabled: canDuplicate,
+                      child: const ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.copy_outlined),
+                        title: Text('Duplicate'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _ArrayItemAction.remove,
+                      enabled: canRemove,
+                      child: const ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.delete_outline),
+                        title: Text('Remove'),
+                      ),
+                    ),
+                  ],
+                  icon: const Icon(Icons.more_vert),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            if (count == 1) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Add another item to enable reordering.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 16),
             _ArrayItemEditor(
               schema: schema,
               value: value,
@@ -265,6 +344,8 @@ final class _ArrayItemCard extends StatelessWidget {
     );
   }
 }
+
+enum _ArrayItemAction { duplicate, remove }
 
 final class _ArrayItemEditor extends StatelessWidget {
   const _ArrayItemEditor({
@@ -287,22 +368,24 @@ final class _ArrayItemEditor extends StatelessWidget {
       final object = value is Map<String, Object?>
           ? value! as Map<String, Object?>
           : <String, Object?>{};
+      final fields = schema.fields ?? const <FieldSchema>[];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final child in schema.fields ?? const <FieldSchema>[]) ...[
+          for (var index = 0; index < fields.length; index++) ...[
             _ArrayItemEditor(
-              schema: child,
-              value: PathUtils.getValue(object, child.key),
-              enabled: enabled && !child.disabled && !child.readOnly,
-              path: '$path.${child.key}',
+              schema: fields[index],
+              value: PathUtils.getValue(object, fields[index].key),
+              enabled:
+                  enabled && !fields[index].disabled && !fields[index].readOnly,
+              path: '$path.${fields[index].key}',
               onChanged: (childValue) {
                 final next = thawJsonValue(object)! as Map<String, Object?>;
-                PathUtils.setValue(next, child.key, childValue);
+                PathUtils.setValue(next, fields[index].key, childValue);
                 onChanged(next);
               },
             ),
-            const SizedBox(height: 12),
+            if (index < fields.length - 1) const SizedBox(height: 12),
           ],
         ],
       );
@@ -564,6 +647,9 @@ final class _SkyloomTextFieldState extends State<_SkyloomTextField> {
     field.setFocused(_focusNode.hasFocus);
     if (!_focusNode.hasFocus && widget.rendererContext.validateOnBlur) {
       widget.rendererContext.formController.validateField(field.key);
+      unawaited(
+        widget.rendererContext.formController.validateFieldAsync(field.key),
+      );
     }
   }
 
@@ -694,7 +780,9 @@ final class MaterialRadioFieldRenderer implements SkyloomFieldRenderer {
   Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
     final schema = rendererContext.fieldSchema;
     final field = rendererContext.fieldController;
-    final options = schema.options ?? const [];
+    final options = rendererContext.formController.optionsFor(
+      rendererContext.fieldPath,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -730,6 +818,9 @@ final class MaterialSelectFieldRenderer implements SkyloomFieldRenderer {
   @override
   Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
     final schema = rendererContext.fieldSchema;
+    if (schema.dataSource != null) {
+      return _SkyloomAsyncSelectField(rendererContext: rendererContext);
+    }
     final field = rendererContext.fieldController;
     final options = schema.options ?? const [];
     final selectedValue = options.any((option) => option.value == field.value)
@@ -755,6 +846,193 @@ final class MaterialSelectFieldRenderer implements SkyloomFieldRenderer {
           ? rendererContext.setValue
           : null,
     );
+  }
+}
+
+final class _SkyloomAsyncSelectField extends StatelessWidget {
+  const _SkyloomAsyncSelectField({required this.rendererContext});
+
+  final SkyloomRendererContext rendererContext;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: rendererContext.formController,
+      builder: (context, _) {
+        final schema = rendererContext.fieldSchema;
+        final field = rendererContext.fieldController;
+        final state = rendererContext.formController.dataSourceState(
+          rendererContext.fieldPath,
+        );
+        final options = rendererContext.formController.optionsFor(
+          rendererContext.fieldPath,
+        );
+        String? selectedLabel;
+        for (final option in options) {
+          if (option.value == field.value) selectedLabel = option.label;
+        }
+        return TextFormField(
+          key: ValueKey('${rendererContext.fieldPath}:${field.value}'),
+          initialValue: selectedLabel ?? field.value?.toString() ?? '',
+          enabled: field.enabled,
+          readOnly: true,
+          decoration: InputDecoration(
+            labelText: schema.label,
+            hintText: schema.placeholder,
+            helperText: schema.helperText ?? schema.description,
+            errorText: field.error,
+            suffixIcon: state.loading
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : const Icon(Icons.arrow_drop_down),
+          ),
+          onTap: field.readOnly ? null : () => _showPicker(context),
+        );
+      },
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context) async {
+    final controller = rendererContext.formController;
+    final config = rendererContext.fieldSchema.dataSource!;
+    Timer? debounce;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          rendererContext.fieldSchema.label ?? rendererContext.fieldPath,
+        ),
+        content: SizedBox(
+          width: 420,
+          height: 480,
+          child: Column(
+            children: [
+              if (config.search)
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Search',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (query) {
+                    debounce?.cancel();
+                    debounce = Timer(
+                      Duration(milliseconds: config.debounceMilliseconds),
+                      () => unawaited(
+                        controller.loadOptions(
+                          rendererContext.fieldPath,
+                          search: query,
+                          force: true,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              if (config.search) const SizedBox(height: 12),
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) {
+                    final state = controller.dataSourceState(
+                      rendererContext.fieldPath,
+                    );
+                    if (state.loading && state.options.isEmpty) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (state.error != null && state.options.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(state.error.toString()),
+                            const SizedBox(height: 8),
+                            FilledButton.tonal(
+                              onPressed: () => unawaited(
+                                controller.loadOptions(
+                                  rendererContext.fieldPath,
+                                  search: state.search,
+                                  force: true,
+                                ),
+                              ),
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    if (state.options.isEmpty) {
+                      return const Center(child: Text('No options found.'));
+                    }
+                    return NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.metrics.extentAfter < 100 &&
+                            state.hasMore &&
+                            !state.loading) {
+                          unawaited(
+                            controller.loadNextOptionsPage(
+                              rendererContext.fieldPath,
+                            ),
+                          );
+                        }
+                        return false;
+                      },
+                      child: ListView(
+                        children: [
+                          for (final option in state.options)
+                            ListTile(
+                              title: Text(option.label),
+                              selected:
+                                  option.value ==
+                                  rendererContext.fieldController.value,
+                              onTap: () {
+                                rendererContext.setValue(option.value);
+                                Navigator.of(dialogContext).pop();
+                              },
+                            ),
+                          if (state.hasMore)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: FilledButton.tonal(
+                                onPressed: state.loading
+                                    ? null
+                                    : () => unawaited(
+                                        controller.loadNextOptionsPage(
+                                          rendererContext.fieldPath,
+                                        ),
+                                      ),
+                                child: state.loading
+                                    ? const SizedBox.square(
+                                        dimension: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Load more'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    debounce?.cancel();
   }
 }
 

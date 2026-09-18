@@ -1,4 +1,6 @@
 import '../utils/json_value_utils.dart';
+import 'async_validation_schema.dart';
+import 'data_source_schema.dart';
 import 'dependency_schema.dart';
 import 'field_option.dart';
 import 'validation_schema.dart';
@@ -28,6 +30,8 @@ final class FieldSchema {
     this.hasDefaultItem = false,
     List<String> dependsOn = const [],
     this.dependency = const DependencySchema(),
+    this.dataSource,
+    this.asyncValidation,
     this.validation,
     Map<String, Object?> metadata = const {},
     Map<String, Object?> additionalProperties = const {},
@@ -70,6 +74,8 @@ final class FieldSchema {
   final bool hasDefaultItem;
   final List<String> dependsOn;
   final DependencySchema dependency;
+  final DataSourceSchema? dataSource;
+  final AsyncValidationSchema? asyncValidation;
   final ValidationSchema? validation;
   final Map<String, Object?> metadata;
 
@@ -101,6 +107,8 @@ final class FieldSchema {
       if (dependsOn.isNotEmpty) 'dependsOn': dependsOn,
       if (dependsOn.isNotEmpty && dependency.toJson().isNotEmpty)
         'dependencyConfig': dependency.toJson(),
+      if (dataSource != null) 'dataSource': dataSource!.toJson(),
+      if (asyncValidation != null) 'asyncValidation': asyncValidation!.toJson(),
       if (validation != null) 'validation': validation!.toJson(),
       if (metadata.isNotEmpty) 'metadata': _thawMap(metadata),
     };

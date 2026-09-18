@@ -4,9 +4,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../engine/condition_engine.dart';
+import '../engine/data_source.dart';
+import '../engine/async_validation.dart';
 import '../engine/validation_engine.dart';
 import '../schema/dependency_schema.dart';
 import '../schema/field_schema.dart';
+import '../schema/field_option.dart';
 import '../schema/form_schema.dart';
 import '../schema/form_type.dart';
 import '../schema/validation_rule.dart';
@@ -22,6 +25,12 @@ typedef SkyloomSubmitCallback =
 typedef SkyloomValidator =
     String? Function(Object? value, SkyloomValidatorContext context);
 
+typedef SkyloomAsyncValidator =
+    FutureOr<String?> Function(
+      Object? value,
+      SkyloomAsyncValidatorContext context,
+    );
+
 typedef SkyloomDependencyCallback =
     FutureOr<void> Function(SkyloomDependencyChange change);
 
@@ -34,6 +43,21 @@ final class SkyloomValidatorContext {
   });
 
   final FieldSchema fieldSchema;
+  final SkyloomFormController formController;
+  final Map<String, Object?> values;
+}
+
+/// Information supplied to an application-defined asynchronous validator.
+final class SkyloomAsyncValidatorContext {
+  const SkyloomAsyncValidatorContext({
+    required this.fieldSchema,
+    required this.fieldKey,
+    required this.formController,
+    required this.values,
+  });
+
+  final FieldSchema fieldSchema;
+  final String fieldKey;
   final SkyloomFormController formController;
   final Map<String, Object?> values;
 }
@@ -61,13 +85,20 @@ final class SkyloomFormController extends ChangeNotifier {
     this.validationEngine = const ValidationEngine(),
     this.conditionEngine = const ConditionEngine(),
     Map<String, SkyloomValidator> validators = const {},
+    Map<String, SkyloomDataSource> dataSources = const {},
+    Map<String, SkyloomAsyncValidator> asyncValidators = const {},
     this.onDependencyChanged,
-  }) : _validators = Map<String, SkyloomValidator>.unmodifiable(validators) {
+  }) : _validators = Map<String, SkyloomValidator>.unmodifiable(validators),
+       _dataSources = Map<String, SkyloomDataSource>.unmodifiable(dataSources),
+       _asyncValidators = Map<String, SkyloomAsyncValidator>.unmodifiable(
+         asyncValidators,
+       ) {
     _buildDefaultValues(schema.fields);
     _registerFields(schema.fields, initialValues);
     _buildDependencyGraph();
     _captureValueSnapshots();
     _applyConditions();
+    _loadInitialDataSources();
   }
 
   final FormSchema schema;
@@ -76,11 +107,20 @@ final class SkyloomFormController extends ChangeNotifier {
   final SkyloomDependencyCallback? onDependencyChanged;
 
   Map<String, SkyloomValidator> _validators;
+  Map<String, SkyloomDataSource> _dataSources;
+  Map<String, SkyloomAsyncValidator> _asyncValidators;
   final Map<String, SkyloomFieldController> _fields = {};
   final Map<String, VoidCallback> _fieldListeners = {};
   final Map<String, List<String>> _dependents = {};
   final Map<String, String> _valueSnapshots = {};
   final Map<String, Object?> _defaultValues = {};
+  final Map<String, SkyloomDataSourceState> _dataSourceStates = {};
+  final Map<String, SkyloomDataSourceResult> _dataSourceCache = {};
+  final Map<String, int> _dataSourceGenerations = {};
+  final Map<String, SkyloomAsyncValidationStatus> _asyncValidationStates = {};
+  final Map<String, String?> _asyncValidationCache = {};
+  final Map<String, int> _asyncValidationGenerations = {};
+  final Map<String, Timer> _asyncValidationTimers = {};
 
   bool _submitting = false;
   bool _submitted = false;
@@ -91,6 +131,14 @@ final class SkyloomFormController extends ChangeNotifier {
   bool _batchNotificationPending = false;
 
   Map<String, SkyloomValidator> get validators => _validators;
+  Map<String, SkyloomDataSource> get dataSources => _dataSources;
+  Map<String, SkyloomAsyncValidator> get asyncValidators => _asyncValidators;
+  Map<String, SkyloomDataSourceState> get dataSourceStates =>
+      Map<String, SkyloomDataSourceState>.unmodifiable(_dataSourceStates);
+  Map<String, SkyloomAsyncValidationStatus> get asyncValidationStates =>
+      Map<String, SkyloomAsyncValidationStatus>.unmodifiable(
+        _asyncValidationStates,
+      );
 
   Map<String, SkyloomFieldController> get fields =>
       Map<String, SkyloomFieldController>.unmodifiable(_fields);
@@ -268,6 +316,271 @@ final class SkyloomFormController extends ChangeNotifier {
     _validators = Map<String, SkyloomValidator>.unmodifiable(validators);
   }
 
+  void setDataSources(Map<String, SkyloomDataSource> dataSources) {
+    _dataSources = Map<String, SkyloomDataSource>.unmodifiable(dataSources);
+    _loadInitialDataSources();
+  }
+
+  void setAsyncValidators(Map<String, SkyloomAsyncValidator> asyncValidators) {
+    _asyncValidators = Map<String, SkyloomAsyncValidator>.unmodifiable(
+      asyncValidators,
+    );
+  }
+
+  SkyloomDataSourceState dataSourceState(String key) {
+    field(key);
+    return _dataSourceStates[key] ?? const SkyloomDataSourceState();
+  }
+
+  List<FieldOption> optionsFor(String key) {
+    final target = field(key);
+    if (target.schema.dataSource != null) {
+      return dataSourceState(key).options;
+    }
+    return target.schema.options ?? const [];
+  }
+
+  SkyloomAsyncValidationStatus asyncValidationStatus(String key) {
+    field(key);
+    return _asyncValidationStates[key] ?? SkyloomAsyncValidationStatus.idle;
+  }
+
+  Future<SkyloomDataSourceState> loadOptions(
+    String key, {
+    String search = '',
+    int page = 1,
+    bool append = false,
+    bool force = false,
+  }) async {
+    final target = field(key);
+    final config = target.schema.dataSource;
+    if (config == null) {
+      throw ArgumentError.value(key, 'key', 'Field has no data source.');
+    }
+    final handler = _dataSources[config.handler];
+    if (handler == null) {
+      final state = SkyloomDataSourceState(
+        error: StateError(
+          'No data source is registered for "${config.handler}".',
+        ),
+        search: search,
+        page: page,
+      );
+      _dataSourceStates[key] = state;
+      _markChanged();
+      return state;
+    }
+
+    final dependencyValues = <String, Object?>{};
+    for (final declared in target.schema.dependsOn) {
+      final resolved = _resolveDependencyPath(key, declared);
+      dependencyValues[declared] = value(resolved);
+    }
+    final cacheKey = jsonEncode({
+      'handler': config.handler,
+      'search': search,
+      'page': page,
+      'pageSize': config.pageSize,
+      'dependencies': dependencyValues,
+    });
+    final cached = config.cache && !force ? _dataSourceCache[cacheKey] : null;
+    if (cached != null) {
+      final options = append
+          ? [...dataSourceState(key).options, ...cached.options]
+          : cached.options;
+      final state = SkyloomDataSourceState(
+        options: options,
+        search: search,
+        page: page,
+        hasMore: cached.hasMore,
+      );
+      _dataSourceStates[key] = state;
+      _markChanged();
+      return state;
+    }
+
+    final generation = (_dataSourceGenerations[key] ?? 0) + 1;
+    _dataSourceGenerations[key] = generation;
+    final previous = dataSourceState(key);
+    _dataSourceStates[key] = previous.copyWith(
+      loading: true,
+      clearError: true,
+      search: search,
+      page: page,
+    );
+    target.setLoading(true);
+    _markChanged();
+    try {
+      final response = await handler(
+        SkyloomDataSourceRequest(
+          fieldKey: key,
+          search: search,
+          page: page,
+          pageSize: config.pageSize,
+          dependencyValues: dependencyValues,
+          formValues: values,
+          fieldMetadata: target.schema.metadata,
+        ),
+      );
+      final result = SkyloomDataSourceResult.fromResponse(
+        response,
+        labelField: config.labelField,
+        valueField: config.valueField,
+        metadataField: config.metadataField,
+      );
+      if (_dataSourceGenerations[key] != generation) {
+        return dataSourceState(key);
+      }
+      if (config.cache) _dataSourceCache[cacheKey] = result;
+      final options = append
+          ? [...previous.options, ...result.options]
+          : result.options;
+      final state = SkyloomDataSourceState(
+        options: options,
+        search: search,
+        page: page,
+        hasMore: result.hasMore,
+      );
+      _dataSourceStates[key] = state;
+      target.setLoading(false);
+      _markChanged();
+      return state;
+    } catch (error) {
+      if (_dataSourceGenerations[key] != generation) {
+        return dataSourceState(key);
+      }
+      final state = previous.copyWith(
+        loading: false,
+        error: error,
+        search: search,
+        page: page,
+      );
+      _dataSourceStates[key] = state;
+      target.setLoading(false);
+      _markChanged();
+      return state;
+    }
+  }
+
+  Future<SkyloomDataSourceState> loadNextOptionsPage(String key) {
+    final state = dataSourceState(key);
+    if (state.loading || !state.hasMore) return Future.value(state);
+    return loadOptions(
+      key,
+      search: state.search,
+      page: state.page + 1,
+      append: true,
+    );
+  }
+
+  void cancelDataSourceRequest(String key) {
+    _dataSourceGenerations[key] = (_dataSourceGenerations[key] ?? 0) + 1;
+    final target = field(key);
+    target.setLoading(false);
+    _dataSourceStates[key] = dataSourceState(key).copyWith(loading: false);
+    _markChanged();
+  }
+
+  void scheduleAsyncValidation(String key) {
+    final config = field(key).schema.asyncValidation;
+    if (config == null) return;
+    _asyncValidationTimers.remove(key)?.cancel();
+    _asyncValidationTimers[key] = Timer(
+      Duration(milliseconds: config.debounceMilliseconds),
+      () => unawaited(validateFieldAsync(key)),
+    );
+  }
+
+  Future<bool> validateFieldAsync(String key) async {
+    final target = field(key);
+    final config = target.schema.asyncValidation;
+    if (config == null) return validateField(key);
+    if (!validateField(key)) return false;
+    final validator = _asyncValidators[config.handler];
+    if (validator == null) {
+      target.setError(
+        'No async validator is registered for "${config.handler}".',
+      );
+      _asyncValidationStates[key] = SkyloomAsyncValidationStatus.failure;
+      _markChanged();
+      return false;
+    }
+
+    final actualValue = value(key);
+    final cacheKey = jsonEncode({
+      'handler': config.handler,
+      'value': actualValue,
+      'values': values,
+    });
+    if (config.cache && _asyncValidationCache.containsKey(cacheKey)) {
+      final error = _asyncValidationCache[cacheKey];
+      target.setError(error);
+      _asyncValidationStates[key] = error == null
+          ? SkyloomAsyncValidationStatus.success
+          : SkyloomAsyncValidationStatus.failure;
+      _markChanged();
+      return error == null;
+    }
+
+    final generation = (_asyncValidationGenerations[key] ?? 0) + 1;
+    _asyncValidationGenerations[key] = generation;
+    _asyncValidationStates[key] = SkyloomAsyncValidationStatus.validating;
+    target.setLoading(true);
+    _markChanged();
+    try {
+      final error = await validator(
+        actualValue,
+        SkyloomAsyncValidatorContext(
+          fieldSchema: target.schema,
+          fieldKey: key,
+          formController: this,
+          values: values,
+        ),
+      );
+      if (_asyncValidationGenerations[key] != generation) return false;
+      if (config.cache) _asyncValidationCache[cacheKey] = error;
+      target
+        ..setError(error)
+        ..setLoading(false);
+      _asyncValidationStates[key] = error == null
+          ? SkyloomAsyncValidationStatus.success
+          : SkyloomAsyncValidationStatus.failure;
+      _markChanged();
+      return error == null;
+    } catch (error) {
+      if (_asyncValidationGenerations[key] != generation) return false;
+      target
+        ..setError(error.toString())
+        ..setLoading(false);
+      _asyncValidationStates[key] = SkyloomAsyncValidationStatus.failure;
+      _markChanged();
+      return false;
+    }
+  }
+
+  Future<bool> validateAsync() async {
+    final results = await Future.wait([
+      for (final target in _fields.values)
+        if (target.schema.asyncValidation != null)
+          validateFieldAsync(target.key),
+    ]);
+    return results.every((valid) => valid);
+  }
+
+  void cancelAsyncValidation(String key) {
+    _asyncValidationTimers.remove(key)?.cancel();
+    _asyncValidationGenerations[key] =
+        (_asyncValidationGenerations[key] ?? 0) + 1;
+    _asyncValidationStates[key] = SkyloomAsyncValidationStatus.idle;
+    field(key).setLoading(false);
+    _markChanged();
+  }
+
+  void clearAsyncCaches() {
+    _asyncValidationCache.clear();
+    _dataSourceCache.clear();
+  }
+
   void markAllTouched() {
     _runBatch(() {
       for (final target in _fields.values) {
@@ -337,6 +650,7 @@ final class SkyloomFormController extends ChangeNotifier {
   }) async {
     markAllTouched();
     if (shouldValidate && !validate()) return false;
+    if (shouldValidate && !await validateAsync()) return false;
     _submitting = true;
     notifyListeners();
     try {
@@ -538,6 +852,17 @@ final class SkyloomFormController extends ChangeNotifier {
           changedValueKeys.add(candidate);
         }
       }
+      if (changedValueKeys.contains(key)) {
+        _asyncValidationTimers.remove(key)?.cancel();
+        _asyncValidationGenerations[key] =
+            (_asyncValidationGenerations[key] ?? 0) + 1;
+        _asyncValidationStates[key] = SkyloomAsyncValidationStatus.idle;
+        if (_fields[key]?.schema.asyncValidation != null &&
+            _fields[key]!.loading &&
+            !dataSourceState(key).loading) {
+          _fields[key]!.setLoading(false);
+        }
+      }
       for (final changedKey in changedValueKeys) {
         _processDependencies(changedKey);
       }
@@ -565,6 +890,10 @@ final class SkyloomFormController extends ChangeNotifier {
       }
       if (configuration.revalidateOnChange) {
         validateField(dependentKey);
+      }
+      if (configuration.reloadDataOnChange &&
+          dependent.schema.dataSource != null) {
+        unawaited(loadOptions(dependentKey, force: true));
       }
       onDependencyChanged?.call(
         SkyloomDependencyChange(
@@ -786,6 +1115,15 @@ final class SkyloomFormController extends ChangeNotifier {
     return null;
   }
 
+  void _loadInitialDataSources() {
+    for (final target in _fields.values) {
+      final config = target.schema.dataSource;
+      if (config != null && _dataSources.containsKey(config.handler)) {
+        unawaited(loadOptions(target.key));
+      }
+    }
+  }
+
   Iterable<SkyloomFieldController> get _leafFields =>
       _fields.values.where((field) => field.schema.type != FormType.object);
 
@@ -830,6 +1168,9 @@ final class SkyloomFormController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final timer in _asyncValidationTimers.values) {
+      timer.cancel();
+    }
     for (final entry in _fields.entries) {
       entry.value
         ..removeListener(_fieldListeners[entry.key]!)

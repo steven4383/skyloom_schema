@@ -19,6 +19,10 @@ const employeeSchema = <String, Object?>{
       'type': FormType.email,
       'label': 'Email address',
       'validation': {'required': true, 'email': true},
+      'asyncValidation': {
+        'handler': 'emailAvailable',
+        'debounceMilliseconds': 350,
+      },
     },
     {
       'key': 'age',
@@ -75,9 +79,10 @@ const employeeSchema = <String, Object?>{
         },
         {
           'key': 'state',
-          'type': FormType.text,
+          'type': FormType.select,
           'label': 'State',
           'dependsOn': ['country'],
+          'dataSource': {'handler': 'states'},
           'dependencyConfig': {
             'clearOnChange': true,
             'reloadDataOnChange': true,
@@ -101,6 +106,71 @@ const employeeSchema = <String, Object?>{
       },
     },
     {'key': 'notes', 'type': FormType.textarea, 'label': 'Notes'},
+  ],
+  'uiSchema': {
+    'name': {
+      'layout': {'tablet': 6, 'desktop': 6},
+      'order': 1,
+    },
+    'email': {
+      'layout': {'tablet': 6, 'desktop': 6},
+      'order': 2,
+    },
+    'age': {
+      'layout': {'tablet': 4, 'desktop': 4},
+      'order': 3,
+    },
+    'role': {
+      'layout': {'tablet': 8, 'desktop': 4},
+      'order': 4,
+    },
+    'dateOfBirth': {
+      'layout': {'tablet': 4, 'desktop': 4},
+      'order': 5,
+    },
+    'contactPreference': {
+      'layout': {'tablet': 6, 'desktop': 4},
+      'order': 1,
+    },
+    'notificationsEnabled': {
+      'layout': {'tablet': 6, 'desktop': 4},
+      'order': 2,
+    },
+    'acceptedTerms': {
+      'layout': {'tablet': 6, 'desktop': 4},
+      'order': 3,
+    },
+    'notes': {
+      'layout': {'desktop': 12},
+      'order': 4,
+    },
+  },
+  'sections': [
+    {
+      'id': 'identity',
+      'title': 'Employee details',
+      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth'],
+      'order': 1,
+    },
+    {
+      'id': 'preferences',
+      'title': 'Preferences',
+      'fields': [
+        'contactPreference',
+        'notificationsEnabled',
+        'acceptedTerms',
+        'notes',
+      ],
+      'collapsible': true,
+      'order': 2,
+    },
+    {
+      'id': 'contact',
+      'title': 'Address and emergency contacts',
+      'fields': ['address', 'emergencyContacts'],
+      'collapsible': true,
+      'order': 3,
+    },
   ],
 };
 
@@ -147,6 +217,29 @@ class _EmployeeFormPageState extends State<EmployeeFormPage> {
               ),
               initialValues: const {
                 'address': {'country': 'IN', 'city': 'Chennai'},
+              },
+              dataSources: {
+                'states': (request) async {
+                  await Future<void>.delayed(const Duration(milliseconds: 250));
+                  final country = request.dependencyValues['country'];
+                  return country == 'US'
+                      ? [
+                          {'label': 'California', 'value': 'CA'},
+                          {'label': 'New York', 'value': 'NY'},
+                        ]
+                      : [
+                          {'label': 'Tamil Nadu', 'value': 'TN'},
+                          {'label': 'Karnataka', 'value': 'KA'},
+                        ];
+                },
+              },
+              asyncValidators: {
+                'emailAvailable': (value, validationContext) async {
+                  await Future<void>.delayed(const Duration(milliseconds: 350));
+                  return value == 'used@example.com'
+                      ? 'This email address is already registered.'
+                      : null;
+                },
               },
               onDependencyChanged: (change) {
                 if (change.configuration.reloadDataOnChange) {
