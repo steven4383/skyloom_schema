@@ -1,5 +1,17 @@
 import '../utils/json_value_utils.dart';
 
+/// Built-in visual-hint names understood by the Material renderers.
+abstract final class FormUiHint {
+  static const String radioDirection = 'radioDirection';
+  static const String multiSelect = 'multiSelect';
+}
+
+/// JSON-safe direction values used by [FormUiHint.radioDirection].
+abstract final class FormUiDirection {
+  static const String row = 'row';
+  static const String column = 'column';
+}
+
 /// Responsive twelve-column span configuration for one field.
 final class ResponsiveLayoutSchema {
   const ResponsiveLayoutSchema({

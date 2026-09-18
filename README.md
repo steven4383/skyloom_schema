@@ -8,7 +8,7 @@ while keeping rendering replaceable.
 
 ## Project status
 
-The package is currently at version `0.8.1`.
+The package is currently at version `0.9.2`.
 
 Available now:
 
@@ -40,9 +40,18 @@ Available now:
 - Debounced async validation with cancellation and latest-value protection
 - Responsive mobile, tablet, and desktop field spans
 - Ordered and collapsible form sections
+- Collapsed-section validation summaries
+- Horizontal or vertical radio layouts and choice/filter chips
+- Ordered and conditional multi-step workflows with per-step validation
+- Next, back, and programmatic step navigation
+- JSON-compatible workflow save and restore snapshots
+- Unified field, server, and form-level error summaries
+- Automatic invalid-field navigation across steps and collapsed sections
+- Lazy top-level rendering and isolated field repaints for large forms
+- Accessible step progress and live validation announcements
 
-Multi-step workflows, unified form-level errors, and pre-1.0 performance and
-accessibility hardening remain on the roadmap.
+The remaining work before `1.0.0` is API stabilization, broader platform
+verification, benchmarks, and final migration documentation.
 
 ## How the complete system works
 
@@ -197,7 +206,7 @@ The full foundation contract is documented in the
 
 ## Complete schema and values example
 
-The following example uses APIs available in `0.8.1`. It defines a form,
+The following example uses APIs available in `0.9.2`. It defines a form,
 parses it, creates nested values, and produces JSON-compatible output.
 
 Validation definitions are parsed with the schema and executed when the schema
@@ -467,6 +476,19 @@ controller.reset();
 controller.loadJson(existingEmployee); // New pristine edit baseline.
 controller.clear();
 controller.submit();
+
+// Multi-step workflow control and persistence.
+controller.validateCurrentStep();
+await controller.validateCurrentStepAsync();
+await controller.nextStep();
+controller.previousStep();
+await controller.goToStep('contact');
+final savedState = controller.saveState();
+controller.restoreState(savedState);
+
+// Server and form-level errors.
+controller.setError('email', 'Email already exists.');
+controller.setFormErrors(['The request could not be completed.']);
 ```
 
 Each field controller tracks its value, initial value, dirty, touched, focused,
@@ -736,7 +758,112 @@ the future `skyloom_ui` package.
 
 Fields can belong to at most one section. Unknown field references and
 duplicate section IDs are rejected during parsing. Fields omitted from all
-sections are rendered after the ordered sections.
+sections are rendered after the ordered sections. When submission finds errors
+inside a collapsed section, its header displays an error count and the first
+message so validation is never hidden from the user.
+
+### Multi-step workflows
+
+Add `steps` to divide every root field into ordered pages. Each root field must
+belong to exactly one step. A step can use any normal condition-engine
+expression in `visibleWhen`; hidden steps are omitted from navigation and
+validation while their values are preserved.
+
+```dart
+'steps': [
+  {
+    'id': 'identity',
+    'title': 'Identity',
+    'description': 'Tell us who you are.',
+    'fields': ['name', 'accountType'],
+    'order': 1,
+  },
+  {
+    'id': 'business',
+    'title': 'Business details',
+    'fields': ['companyName'],
+    'order': 2,
+    'visibleWhen': {'field': 'accountType', 'equals': 'business'},
+  },
+  {
+    'id': 'contact',
+    'title': 'Contact',
+    'fields': ['email'],
+    'order': 3,
+  },
+]
+```
+
+`SkyloomForm` automatically renders progress plus Back, Next, and Submit
+actions. Next validates only the current step, including asynchronous
+validators. Customize the labels and progress as needed:
+
+```dart
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  nextButtonLabel: 'Continue',
+  backButtonLabel: 'Previous',
+  showStepProgress: true,
+  onStepChanged: (step) => print(step.id),
+);
+```
+
+### Unified errors and invalid-field navigation
+
+Field errors and form-level server errors are exposed together through
+`controller.errorEntries`. The default Material renderer shows an accessible
+summary. Selecting a field error moves to its step, expands its section,
+scrolls it into view, and focuses it when possible.
+
+```dart
+controller.setErrors({
+  'email': 'This email address is already registered.',
+});
+controller.setFormErrors([
+  'The employee could not be saved.',
+]);
+
+controller.clearError('email');
+controller.clearFormErrors();
+controller.clearErrors(); // Clears both kinds.
+```
+
+### Radio direction and chips
+
+Radio fields use a vertical column by default. Set a UI hint for a compact
+horizontal layout:
+
+```dart
+'uiSchema': {
+  'contactPreference': {
+    'visualHints': {
+      FormUiHint.radioDirection: FormUiDirection.row,
+    },
+  },
+}
+```
+
+Use `FormType.chip` for a single-select choice-chip group. Set
+`FormUiHint.multiSelect` to `true` to render filter chips whose value is a
+JSON-compatible list:
+
+```dart
+{
+  'key': 'skills',
+  'type': FormType.chip,
+  'label': 'Skills',
+  'options': [
+    {'label': 'Flutter', 'value': 'flutter'},
+    {'label': 'Dart', 'value': 'dart'},
+  ],
+}
+
+'uiSchema': {
+  'skills': {
+    'visualHints': {FormUiHint.multiSelect: true},
+  },
+}
+```
 
 ## Default Material 3 interface
 
@@ -748,6 +875,7 @@ types:
 - Checkbox, radio, and switch
 - Select
 - Date
+- Choice and filter chips
 - Nested object groups
 - Primitive, object, and nested repeatable arrays
 
@@ -773,7 +901,10 @@ This keeps generated forms consistent with the host application's design.
 `SkyloomFormLayout.scrollable` is the default, preventing large forms from
 overflowing when the form receives a bounded height. Use
 `SkyloomFormLayout.column` when a parent `ListView` or another scrollable widget
-already owns scrolling.
+already owns scrolling. Use `SkyloomFormLayout.lazy` for large forms with many
+top-level sections; it uses `ListView.builder`, accepts `cacheExtent`, and
+builds section blocks on demand. Individual fields remain independently
+reactive and are isolated with repaint boundaries.
 
 ## Relationship with skyloom_ui
 
@@ -849,9 +980,10 @@ The current implementation sequence is:
 10. Nested objects, arrays, and dependencies - complete
 11. Async data and async validation - complete
 12. Responsive UI metadata and sections - complete
-13. Multi-step forms and unified errors
-14. Performance, accessibility, documentation, and examples
-15. Stable `1.0.0` API
+13. Multi-step forms and unified errors - complete
+14. Performance, accessibility, documentation, and examples - complete for
+    the pre-1.0 baseline; ongoing benchmarks and platform audits remain
+15. Stable `1.0.0` API - next
 
 ## Running checks
 

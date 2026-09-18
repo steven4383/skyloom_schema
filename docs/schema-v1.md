@@ -1,7 +1,7 @@
 # Skyloom form schema 1.0
 
 This document defines the foundation schema supported by
-`skyloom_schema` 0.8.1. The contract remains forward-compatible: unknown
+`skyloom_schema` 0.9.2. The contract remains forward-compatible: unknown
 properties are preserved during parsing and serialization.
 
 ## Form object
@@ -22,6 +22,7 @@ properties are preserved during parsing and serialization.
 - `schemaVersion` is an optional string and defaults to `1.0`.
 - `title` and `description` are optional strings.
 - `metadata` is an optional JSON object owned by the application.
+- `steps` is an optional array defining a multi-step workflow.
 
 ## Field object
 
@@ -108,12 +109,56 @@ contain:
 
 UI metadata does not affect the form's value structure.
 
+The default Material renderers currently interpret `radioDirection` (`row` or
+`column`) for radio fields and `multiSelect` (boolean) for `chip` fields.
+
 ## Sections
 
 The optional root `sections` array groups root fields. Each section requires a
 unique `id` and a `fields` array. It can also define `title`, `description`,
 `collapsible`, `defaultExpanded`, and `order`. A field cannot belong to more
 than one section. Unassigned fields remain valid and render after sections.
+
+## Steps
+
+The optional root `steps` array divides the form into a workflow. When present,
+it must be non-empty and every root field must belong to exactly one step. Each
+step supports:
+
+- `id`: required unique string
+- `fields`: required non-empty array of root field keys
+- `title` and `description`: optional strings
+- `order`: optional integer, default `0`
+- `visibleWhen`: optional condition-engine expression
+
+Fields cannot belong to multiple steps. Unknown, duplicate, or unassigned
+fields are rejected during parsing. Steps are sorted by `order` with schema
+order used as a stable tie-breaker.
+
+A false `visibleWhen` removes the step from navigation and validation while
+preserving its values. Next-step navigation validates only the current step,
+including asynchronous validators. Final submission validates all currently
+visible steps.
+
+```json
+{
+  "steps": [
+    {
+      "id": "identity",
+      "title": "Identity",
+      "fields": ["name", "accountType"],
+      "order": 1
+    },
+    {
+      "id": "business",
+      "title": "Business",
+      "fields": ["companyName"],
+      "order": 2,
+      "visibleWhen": {"field": "accountType", "equals": "business"}
+    }
+  ]
+}
+```
 
 ## Field keys and value paths
 

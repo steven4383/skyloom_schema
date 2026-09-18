@@ -446,4 +446,263 @@ void main() {
     final firstWidth = tester.getSize(find.byType(TextField).first).width;
     expect(firstWidth, closeTo(572, 30));
   });
+
+  testWidgets('shows validation summary on a collapsed section', (
+    tester,
+  ) async {
+    var submitted = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'collapsed_validation',
+              'fields': [
+                {
+                  'key': 'email',
+                  'type': FormType.email,
+                  'label': 'Email',
+                  'validation': {'required': true},
+                },
+              ],
+              'sections': [
+                {
+                  'id': 'contact',
+                  'title': 'Contact details',
+                  'fields': ['email'],
+                  'collapsible': true,
+                  'defaultExpanded': false,
+                },
+              ],
+            },
+            onSubmit: (_) => submitted = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(TextField), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.pump();
+
+    expect(submitted, isFalse);
+    expect(find.text('1 error'), findsOneWidget);
+    expect(find.text('Email is required.'), findsOneWidget);
+
+    await tester.tap(
+      find.widgetWithText(TextButton, 'Email: Email is required.'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+  });
+
+  testWidgets('supports row and column radio layouts', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'radio_layouts',
+              'fields': [
+                {
+                  'key': 'horizontal',
+                  'type': FormType.radio,
+                  'label': 'Horizontal',
+                  'options': [
+                    {'label': 'Row A', 'value': 'a'},
+                    {'label': 'Row B', 'value': 'b'},
+                  ],
+                },
+                {
+                  'key': 'vertical',
+                  'type': FormType.radio,
+                  'label': 'Vertical',
+                  'options': [
+                    {'label': 'Column A', 'value': 'a'},
+                    {'label': 'Column B', 'value': 'b'},
+                  ],
+                },
+              ],
+              'uiSchema': {
+                'horizontal': {
+                  'visualHints': {
+                    FormUiHint.radioDirection: FormUiDirection.row,
+                  },
+                },
+              },
+            },
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    final rowAY = tester
+        .getTopLeft(find.widgetWithText(RadioListTile<Object?>, 'Row A'))
+        .dy;
+    final rowBY = tester
+        .getTopLeft(find.widgetWithText(RadioListTile<Object?>, 'Row B'))
+        .dy;
+    final columnAY = tester
+        .getTopLeft(find.widgetWithText(RadioListTile<Object?>, 'Column A'))
+        .dy;
+    final columnBY = tester
+        .getTopLeft(find.widgetWithText(RadioListTile<Object?>, 'Column B'))
+        .dy;
+
+    expect(rowAY, rowBY);
+    expect(columnBY, greaterThan(columnAY));
+  });
+
+  testWidgets('supports single-select and multi-select chips', (tester) async {
+    final parsed = const SchemaParser().parse({
+      'id': 'chips',
+      'fields': [
+        {
+          'key': 'skills',
+          'type': FormType.chip,
+          'label': 'Skills',
+          'options': [
+            {'label': 'Flutter', 'value': 'flutter'},
+            {'label': 'Dart', 'value': 'dart'},
+          ],
+        },
+        {
+          'key': 'level',
+          'type': FormType.chip,
+          'label': 'Level',
+          'options': [
+            {'label': 'Junior', 'value': 'junior'},
+            {'label': 'Senior', 'value': 'senior'},
+          ],
+        },
+      ],
+      'uiSchema': {
+        'skills': {
+          'visualHints': {FormUiHint.multiSelect: true},
+        },
+      },
+    });
+    final controller = SkyloomFormController(schema: parsed);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm(
+            schema: parsed,
+            controller: controller,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Flutter'));
+    await tester.tap(find.widgetWithText(FilterChip, 'Dart'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Senior'));
+    await tester.pump();
+
+    expect(controller.value('skills'), ['flutter', 'dart']);
+    expect(controller.value('level'), 'senior');
+  });
+
+  testWidgets('renders and validates a multi-step workflow', (tester) async {
+    var submitted = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'wizard',
+              'fields': [
+                {
+                  'key': 'name',
+                  'type': FormType.text,
+                  'label': 'Name',
+                  'validation': {'required': true},
+                },
+                {'key': 'email', 'type': FormType.email, 'label': 'Email'},
+              ],
+              'steps': [
+                {
+                  'id': 'identity',
+                  'title': 'Identity',
+                  'fields': ['name'],
+                },
+                {
+                  'id': 'contact',
+                  'title': 'Contact',
+                  'fields': ['email'],
+                },
+              ],
+            },
+            onSubmit: (_) => submitted = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Step 1 of 2'), findsOneWidget);
+    expect(find.text('Identity'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == 'Step 1 of 2: Identity',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Email'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Please review 1 error'), findsOneWidget);
+    expect(find.textContaining('Name is required.'), findsWidgets);
+
+    await tester.enterText(find.byType(TextField), 'Sky');
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 2'), findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Back'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.pump();
+    expect(submitted, isTrue);
+  });
+
+  testWidgets('shows form errors and supports lazy large-form layout', (
+    tester,
+  ) async {
+    final parsed = const SchemaParser().parse({
+      'id': 'server_errors',
+      'fields': [
+        {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+      ],
+    });
+    final controller = SkyloomFormController(schema: parsed)
+      ..setFormErrors(['The service is temporarily unavailable.']);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm(
+            schema: parsed,
+            controller: controller,
+            layout: SkyloomFormLayout.lazy,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(ListView), findsOneWidget);
+    expect(find.text('Please review 1 error'), findsOneWidget);
+    expect(
+      find.text('The service is temporarily unavailable.'),
+      findsOneWidget,
+    );
+  });
 }

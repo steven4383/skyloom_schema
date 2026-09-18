@@ -12,6 +12,7 @@ import '../schema/field_schema.dart';
 import '../schema/field_option.dart';
 import '../schema/form_schema.dart';
 import '../schema/form_type.dart';
+import '../schema/step_schema.dart';
 import '../schema/validation_rule.dart';
 import '../utils/json_value_utils.dart';
 import '../utils/path_utils.dart';
@@ -77,6 +78,17 @@ final class SkyloomDependencyChange {
   final SkyloomFormController formController;
 }
 
+/// A normalized field-level or form-level validation error.
+final class SkyloomErrorEntry {
+  const SkyloomErrorEntry({required this.message, this.fieldKey});
+
+  /// Null for a form-level error.
+  final String? fieldKey;
+  final String message;
+
+  bool get isFormError => fieldKey == null;
+}
+
 /// Coordinates recursive field state, values, validation, and dependencies.
 final class SkyloomFormController extends ChangeNotifier {
   SkyloomFormController({
@@ -121,6 +133,8 @@ final class SkyloomFormController extends ChangeNotifier {
   final Map<String, String?> _asyncValidationCache = {};
   final Map<String, int> _asyncValidationGenerations = {};
   final Map<String, Timer> _asyncValidationTimers = {};
+  final List<String> _formErrors = [];
+  List<StepSchema> _visibleSteps = const [];
 
   bool _submitting = false;
   bool _submitted = false;
@@ -129,6 +143,7 @@ final class SkyloomFormController extends ChangeNotifier {
   bool _applyingConditions = false;
   int _batchDepth = 0;
   bool _batchNotificationPending = false;
+  String? _currentStepId;
 
   Map<String, SkyloomValidator> get validators => _validators;
   Map<String, SkyloomDataSource> get dataSources => _dataSources;
@@ -183,7 +198,11 @@ final class SkyloomFormController extends ChangeNotifier {
     return controller;
   }
 
-  bool get valid => _fields.values.every((field) => field.valid);
+  bool get valid =>
+      _formErrors.isEmpty &&
+      _fields.values.every(
+        (field) => !_isFieldInVisibleStep(field.key) || field.valid,
+      );
   bool get invalid => !valid;
   bool get dirty => _fields.values.any((field) => field.dirty);
   bool get pristine => !dirty;
@@ -194,8 +213,52 @@ final class SkyloomFormController extends ChangeNotifier {
 
   Map<String, String> get errors => <String, String>{
     for (final field in _fields.values)
-      if (field.error != null) field.key: field.error!,
+      if (field.error != null && _isFieldInVisibleStep(field.key))
+        field.key: field.error!,
   };
+
+  List<String> get formErrors => List<String>.unmodifiable(_formErrors);
+
+  List<SkyloomErrorEntry> get errorEntries => <SkyloomErrorEntry>[
+    for (final message in _formErrors) SkyloomErrorEntry(message: message),
+    for (final entry in errors.entries)
+      SkyloomErrorEntry(fieldKey: entry.key, message: entry.value),
+  ];
+
+  String? get firstErrorFieldKey {
+    for (final field in _fields.values) {
+      if (field.error != null && _isFieldInVisibleStep(field.key)) {
+        return field.key;
+      }
+    }
+    return null;
+  }
+
+  bool get hasSteps => schema.steps.isNotEmpty;
+
+  /// Ordered steps whose optional condition currently evaluates to true.
+  List<StepSchema> get visibleSteps {
+    return _visibleSteps;
+  }
+
+  StepSchema? get currentStep {
+    final steps = visibleSteps;
+    if (steps.isEmpty) return null;
+    return steps.firstWhere(
+      (step) => step.id == _currentStepId,
+      orElse: () => steps.first,
+    );
+  }
+
+  int get currentStepIndex {
+    final steps = visibleSteps;
+    final id = currentStep?.id;
+    return id == null ? -1 : steps.indexWhere((step) => step.id == id);
+  }
+
+  bool get isFirstStep => !hasSteps || currentStepIndex <= 0;
+  bool get isLastStep =>
+      !hasSteps || currentStepIndex == visibleSteps.length - 1;
 
   void setValue(String key, Object? value, {bool markTouched = true}) {
     final target = field(key);
@@ -254,7 +317,7 @@ final class SkyloomFormController extends ChangeNotifier {
 
   bool validateField(String key) {
     final target = field(key);
-    if (!target.visible || !target.enabled) {
+    if (!_isFieldInVisibleStep(key) || !target.visible || !target.enabled) {
       target.clearError();
       return true;
     }
@@ -286,6 +349,25 @@ final class SkyloomFormController extends ChangeNotifier {
     return result;
   }
 
+  /// Validates only fields belonging to the supplied root field keys.
+  bool validateFields(Iterable<String> rootKeys) {
+    final roots = rootKeys.toSet();
+    var result = true;
+    _runBatch(() {
+      for (final target in _fields.values) {
+        if (_belongsToRoots(target.key, roots) && !validateField(target.key)) {
+          result = false;
+        }
+      }
+    });
+    return result;
+  }
+
+  bool validateCurrentStep() {
+    final step = currentStep;
+    return step == null ? validate() : validateFields(step.fields);
+  }
+
   void setError(String key, String error) => field(key).setError(error);
 
   void setErrors(Map<String, String> newErrors) {
@@ -303,7 +385,36 @@ final class SkyloomFormController extends ChangeNotifier {
       for (final target in _fields.values) {
         target.clearError();
       }
+      if (_formErrors.isNotEmpty) {
+        _formErrors.clear();
+        _markChanged();
+      }
     });
+  }
+
+  void setFormErrors(Iterable<String> errors) {
+    final normalized = errors
+        .map((error) => error.trim())
+        .where((error) => error.isNotEmpty)
+        .toList();
+    if (listEquals(_formErrors, normalized)) return;
+    _formErrors
+      ..clear()
+      ..addAll(normalized);
+    _markChanged();
+  }
+
+  void addFormError(String error) {
+    final normalized = error.trim();
+    if (normalized.isEmpty || _formErrors.contains(normalized)) return;
+    _formErrors.add(normalized);
+    _markChanged();
+  }
+
+  void clearFormErrors() {
+    if (_formErrors.isEmpty) return;
+    _formErrors.clear();
+    _markChanged();
   }
 
   void setLoading(bool loading) {
@@ -561,10 +672,116 @@ final class SkyloomFormController extends ChangeNotifier {
   Future<bool> validateAsync() async {
     final results = await Future.wait([
       for (final target in _fields.values)
-        if (target.schema.asyncValidation != null)
+        if (_isFieldInVisibleStep(target.key) &&
+            target.schema.asyncValidation != null)
           validateFieldAsync(target.key),
     ]);
     return results.every((valid) => valid);
+  }
+
+  Future<bool> validateFieldsAsync(Iterable<String> rootKeys) async {
+    final roots = rootKeys.toSet();
+    final results = await Future.wait([
+      for (final target in _fields.values)
+        if (_belongsToRoots(target.key, roots) &&
+            target.schema.asyncValidation != null)
+          validateFieldAsync(target.key),
+    ]);
+    return results.every((valid) => valid);
+  }
+
+  Future<bool> validateCurrentStepAsync() {
+    final step = currentStep;
+    return step == null ? validateAsync() : validateFieldsAsync(step.fields);
+  }
+
+  /// Validates the current step and advances when it is valid.
+  Future<bool> nextStep({bool validateCurrent = true}) async {
+    final step = currentStep;
+    if (step == null || isLastStep) return false;
+    if (validateCurrent) {
+      _markFieldsTouched(step.fields);
+      if (!validateCurrentStep()) return false;
+      if (!await validateCurrentStepAsync()) return false;
+    }
+    final steps = visibleSteps;
+    final index = steps.indexWhere((candidate) => candidate.id == step.id);
+    if (index < 0 || index + 1 >= steps.length) return false;
+    _currentStepId = steps[index + 1].id;
+    _markChanged();
+    return true;
+  }
+
+  bool previousStep() {
+    final steps = visibleSteps;
+    final index = currentStepIndex;
+    if (index <= 0 || index >= steps.length) return false;
+    _currentStepId = steps[index - 1].id;
+    _markChanged();
+    return true;
+  }
+
+  /// Navigates to a visible step by id.
+  Future<bool> goToStep(String stepId, {bool validateCurrent = false}) async {
+    final steps = visibleSteps;
+    final destination = steps.indexWhere((step) => step.id == stepId);
+    if (destination < 0) return false;
+    if (validateCurrent && destination > currentStepIndex) {
+      final step = currentStep;
+      if (step != null) {
+        _markFieldsTouched(step.fields);
+        if (!validateFields(step.fields) ||
+            !await validateFieldsAsync(step.fields)) {
+          return false;
+        }
+      }
+    }
+    if (_currentStepId == stepId) return true;
+    _currentStepId = stepId;
+    _markChanged();
+    return true;
+  }
+
+  /// JSON-compatible workflow snapshot suitable for local persistence.
+  Map<String, Object?> saveState() => <String, Object?>{
+    'formId': schema.id,
+    'schemaVersion': schema.schemaVersion,
+    'values': values,
+    if (currentStep != null) 'currentStepId': currentStep!.id,
+  };
+
+  /// Restores values and the saved step when that step is currently visible.
+  void restoreState(Map<String, Object?> state) {
+    final formId = state['formId'];
+    if (formId != null && formId != schema.id) {
+      throw ArgumentError.value(
+        formId,
+        'state.formId',
+        'The saved state belongs to a different form.',
+      );
+    }
+    final restoredValues = state['values'];
+    if (restoredValues is! Map<Object?, Object?>) {
+      throw ArgumentError.value(
+        state,
+        'state',
+        'State must contain a JSON object named "values".',
+      );
+    }
+    final normalized = <String, Object?>{
+      for (final entry in restoredValues.entries)
+        if (entry.key is String) entry.key! as String: entry.value,
+    };
+    _runBatch(() {
+      setValues(normalized, markTouched: false);
+      final stepId = state['currentStepId'];
+      if (stepId is String && visibleSteps.any((step) => step.id == stepId)) {
+        _currentStepId = stepId;
+      } else {
+        _reconcileCurrentStep(forceFirst: true);
+      }
+      _markChanged();
+    });
   }
 
   void cancelAsyncValidation(String key) {
@@ -584,7 +801,7 @@ final class SkyloomFormController extends ChangeNotifier {
   void markAllTouched() {
     _runBatch(() {
       for (final target in _fields.values) {
-        target.markTouched();
+        if (_isFieldInVisibleStep(target.key)) target.markTouched();
       }
     });
   }
@@ -604,6 +821,11 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      if (_formErrors.isNotEmpty) {
+        _formErrors.clear();
+        _markChanged();
+      }
+      _reconcileCurrentStep(forceFirst: true);
       _captureValueSnapshots();
     });
   }
@@ -617,6 +839,11 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      if (_formErrors.isNotEmpty) {
+        _formErrors.clear();
+        _markChanged();
+      }
+      _reconcileCurrentStep(forceFirst: true);
       _captureValueSnapshots();
     });
   }
@@ -632,6 +859,11 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      if (_formErrors.isNotEmpty) {
+        _formErrors.clear();
+        _markChanged();
+      }
+      _reconcileCurrentStep(forceFirst: true);
       _captureValueSnapshots();
     });
   }
@@ -648,6 +880,7 @@ final class SkyloomFormController extends ChangeNotifier {
     SkyloomSubmitCallback? onSubmit, {
     required bool shouldValidate,
   }) async {
+    clearFormErrors();
     markAllTouched();
     if (shouldValidate && !validate()) return false;
     if (shouldValidate && !await validateAsync()) return false;
@@ -655,6 +888,7 @@ final class SkyloomFormController extends ChangeNotifier {
     notifyListeners();
     try {
       await onSubmit?.call(values);
+      if (invalid) return false;
       _submitted = true;
       return true;
     } finally {
@@ -1058,9 +1292,65 @@ final class SkyloomFormController extends ChangeNotifier {
           ..setRequired(required)
           ..setReadOnly(readOnly);
       }
+      _refreshVisibleSteps(currentValues);
+      _reconcileCurrentStep();
     } finally {
       _applyingConditions = false;
     }
+  }
+
+  void _refreshVisibleSteps(Map<String, Object?> currentValues) {
+    final indexed = schema.steps.indexed.where((entry) {
+      final condition = entry.$2.visibleWhen;
+      return condition == null ||
+          conditionEngine.evaluate(condition, currentValues);
+    }).toList();
+    indexed.sort((left, right) {
+      final result = left.$2.order.compareTo(right.$2.order);
+      return result != 0 ? result : left.$1.compareTo(right.$1);
+    });
+    _visibleSteps = List<StepSchema>.unmodifiable(
+      indexed.map((entry) => entry.$2),
+    );
+  }
+
+  void _reconcileCurrentStep({bool forceFirst = false}) {
+    if (!hasSteps) {
+      _currentStepId = null;
+      return;
+    }
+    final steps = visibleSteps;
+    if (steps.isEmpty) {
+      _currentStepId = null;
+      return;
+    }
+    if (forceFirst || !steps.any((step) => step.id == _currentStepId)) {
+      _currentStepId = steps.first.id;
+    }
+  }
+
+  void _markFieldsTouched(Iterable<String> rootKeys) {
+    final roots = rootKeys.toSet();
+    _runBatch(() {
+      for (final target in _fields.values) {
+        if (_belongsToRoots(target.key, roots)) target.markTouched();
+      }
+    });
+  }
+
+  bool _belongsToRoots(String path, Set<String> roots) {
+    return roots.any(
+      (root) =>
+          path == root ||
+          path.startsWith('$root.') ||
+          path.startsWith('$root['),
+    );
+  }
+
+  bool _isFieldInVisibleStep(String path) {
+    if (!hasSteps) return true;
+    final root = path.split('.').first.split('[').first;
+    return visibleSteps.any((step) => step.fields.contains(root));
   }
 
   SkyloomFieldController _arrayField(String key) {

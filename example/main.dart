@@ -64,6 +64,17 @@ const employeeSchema = <String, Object?>{
     },
     {'key': 'dateOfBirth', 'type': FormType.date, 'label': 'Date of birth'},
     {
+      'key': 'skills',
+      'type': FormType.chip,
+      'label': 'Skills',
+      'options': [
+        {'label': 'Flutter', 'value': 'flutter'},
+        {'label': 'Dart', 'value': 'dart'},
+        {'label': 'Testing', 'value': 'testing'},
+        {'label': 'Design systems', 'value': 'design-systems'},
+      ],
+    },
+    {
       'key': 'address',
       'type': FormType.object,
       'label': 'Address',
@@ -131,6 +142,7 @@ const employeeSchema = <String, Object?>{
     'contactPreference': {
       'layout': {'tablet': 6, 'desktop': 4},
       'order': 1,
+      'visualHints': {FormUiHint.radioDirection: FormUiDirection.row},
     },
     'notificationsEnabled': {
       'layout': {'tablet': 6, 'desktop': 4},
@@ -144,12 +156,17 @@ const employeeSchema = <String, Object?>{
       'layout': {'desktop': 12},
       'order': 4,
     },
+    'skills': {
+      'layout': {'desktop': 12},
+      'order': 6,
+      'visualHints': {FormUiHint.multiSelect: true},
+    },
   },
   'sections': [
     {
       'id': 'identity',
       'title': 'Employee details',
-      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth'],
+      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth', 'skills'],
       'order': 1,
     },
     {
@@ -169,6 +186,34 @@ const employeeSchema = <String, Object?>{
       'title': 'Address and emergency contacts',
       'fields': ['address', 'emergencyContacts'],
       'collapsible': true,
+      'order': 3,
+    },
+  ],
+  'steps': [
+    {
+      'id': 'identity_step',
+      'title': 'Employee details',
+      'description': 'Add the employee identity and role information.',
+      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth', 'skills'],
+      'order': 1,
+    },
+    {
+      'id': 'preferences_step',
+      'title': 'Preferences',
+      'description': 'Configure communication and onboarding preferences.',
+      'fields': [
+        'contactPreference',
+        'notificationsEnabled',
+        'acceptedTerms',
+        'notes',
+      ],
+      'order': 2,
+    },
+    {
+      'id': 'contact_step',
+      'title': 'Contact details',
+      'description': 'Add an address and emergency contacts.',
+      'fields': ['address', 'emergencyContacts'],
       'order': 3,
     },
   ],

@@ -1,3 +1,34 @@
+## 0.9.2
+
+- Add lazy top-level form rendering and configurable scroll cache extent for
+  large forms.
+- Isolate field repaints and retain field-level reactive rebuilds.
+- Cache the evaluated visible-step list until form values change.
+- Add accessible step progress, live error summaries, and automatic
+  scroll/focus navigation to invalid fields.
+
+## 0.9.1
+
+- Add unified field-level and form-level error entries.
+- Add server/form error APIs and a Material error-summary panel.
+- Navigate error-summary actions across steps and expand collapsed sections.
+
+## 0.9.0
+
+- Add ordered and conditional multi-step form schemas.
+- Add validated next, back, and go-to navigation to the form controller.
+- Add per-step synchronous and asynchronous validation.
+- Add JSON-compatible workflow save and restore snapshots.
+- Add Material step progress and responsive navigation actions.
+
+## 0.8.2
+
+- Show field-error counts and the first validation message in collapsed section
+  headers.
+- Add row and column layouts for radio fields through UI visual hints.
+- Add a Material chip renderer with single-select and multi-select modes.
+- Remove redundant dividers between outlined nested fields.
+
 ## 0.8.1
 
 - Add ordered, collapsible form sections with configurable initial expansion.

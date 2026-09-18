@@ -9,6 +9,7 @@ import '../schema/form_schema.dart';
 import '../schema/validation_schema.dart';
 import '../schema/ui_schema.dart';
 import '../schema/section_schema.dart';
+import '../schema/step_schema.dart';
 import '../utils/json_value_utils.dart';
 
 /// Parses and validates JSON-compatible Skyloom form definitions.
@@ -41,6 +42,7 @@ final class SchemaParser {
       }
     }
     final sections = _parseSections(json['sections'], r'$.sections', fields);
+    final steps = _parseSteps(json['steps'], r'$.steps', fields);
 
     return FormSchema(
       id: _requiredString(json, 'id', r'$.id'),
@@ -51,6 +53,7 @@ final class SchemaParser {
       fields: fields,
       uiSchema: uiSchema,
       sections: sections,
+      steps: steps,
       metadata: _optionalObject(json, 'metadata', r'$.metadata'),
       additionalProperties: _additionalProperties(json, const {
         'schemaVersion',
@@ -61,6 +64,7 @@ final class SchemaParser {
         'metadata',
         'uiSchema',
         'sections',
+        'steps',
       }, r'$'),
     );
   }
@@ -503,6 +507,84 @@ final class SchemaParser {
       ),
       order: _optionalInt(json, 'order', '$path.order') ?? 0,
     );
+  }
+
+  List<StepSchema> _parseSteps(
+    Object? source,
+    String path,
+    List<FieldSchema> fields,
+  ) {
+    if (source == null) return const [];
+    if (source is! List<Object?> || source.isEmpty) {
+      throw SchemaParseException(
+        'Property "steps" must be a non-empty array.',
+        path: path,
+      );
+    }
+    final fieldKeys = fields.map((field) => field.key).toSet();
+    final ids = <String>{};
+    final assignedFields = <String>{};
+    final steps = <StepSchema>[];
+    for (var index = 0; index < source.length; index++) {
+      final stepPath = '$path[$index]';
+      final json = _object(source[index], stepPath);
+      final id = _requiredString(json, 'id', '$stepPath.id');
+      if (!ids.add(id)) {
+        throw SchemaParseException(
+          'Step id "$id" is duplicated.',
+          path: '$stepPath.id',
+        );
+      }
+      final stepFields = _stringList(json, 'fields', '$stepPath.fields');
+      if (!json.containsKey('fields') || stepFields.isEmpty) {
+        throw SchemaParseException(
+          'A step requires a non-empty "fields" array.',
+          path: '$stepPath.fields',
+        );
+      }
+      for (final field in stepFields) {
+        if (!fieldKeys.contains(field)) {
+          throw SchemaParseException(
+            'Step references unknown root field "$field".',
+            path: '$stepPath.fields',
+          );
+        }
+        if (!assignedFields.add(field)) {
+          throw SchemaParseException(
+            'Field "$field" belongs to more than one step.',
+            path: '$stepPath.fields',
+          );
+        }
+      }
+      steps.add(
+        StepSchema(
+          id: id,
+          title: _optionalString(json, 'title', '$stepPath.title'),
+          description: _optionalString(
+            json,
+            'description',
+            '$stepPath.description',
+          ),
+          fields: stepFields,
+          order: _optionalInt(json, 'order', '$stepPath.order') ?? 0,
+          visibleWhen: json.containsKey('visibleWhen')
+              ? freezeJsonValue(
+                  json['visibleWhen'],
+                  path: '$stepPath.visibleWhen',
+                )
+              : null,
+        ),
+      );
+    }
+    final unassigned = fieldKeys.difference(assignedFields);
+    if (unassigned.isNotEmpty) {
+      throw SchemaParseException(
+        'Every root field must belong to a step. Missing: '
+        '${unassigned.join(', ')}.',
+        path: path,
+      );
+    }
+    return steps;
   }
 
   FieldOption _parseOption(Object? source, String path) {

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../registry/renderer_registry.dart';
 import '../../schema/field_schema.dart';
 import '../../schema/form_type.dart';
+import '../../schema/ui_schema.dart';
 import '../../utils/json_value_utils.dart';
 import '../../utils/path_utils.dart';
 import '../field_renderer.dart';
@@ -28,6 +29,7 @@ final class MaterialSkyloomRenderers {
       FormType.radio: const MaterialRadioFieldRenderer(),
       FormType.select: const MaterialSelectFieldRenderer(),
       FormType.date: const MaterialDateFieldRenderer(),
+      FormType.chip: const MaterialChipFieldRenderer(),
       FormType.object: const MaterialObjectFieldRenderer(),
       FormType.array: const MaterialArrayFieldRenderer(),
       ...overrides,
@@ -783,6 +785,23 @@ final class MaterialRadioFieldRenderer implements SkyloomFieldRenderer {
     final options = rendererContext.formController.optionsFor(
       rendererContext.fieldPath,
     );
+    final visualHints = rendererContext
+        .formController
+        .schema
+        .uiSchema[rendererContext.fieldPath]
+        ?.visualHints;
+    final horizontal =
+        visualHints?[FormUiHint.radioDirection] == FormUiDirection.row;
+    final tiles = [
+      for (final option in options)
+        RadioListTile<Object?>(
+          dense: horizontal,
+          contentPadding: EdgeInsets.zero,
+          title: Text(option.label),
+          value: option.value,
+          enabled: field.enabled && !field.readOnly,
+        ),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -794,17 +813,91 @@ final class MaterialRadioFieldRenderer implements SkyloomFieldRenderer {
           onChanged: field.enabled && !field.readOnly
               ? rendererContext.setValue
               : (_) {},
-          child: Column(
-            children: [
-              for (final option in options)
-                RadioListTile<Object?>(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(option.label),
-                  value: option.value,
-                  enabled: field.enabled && !field.readOnly,
+          child: horizontal
+              ? Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final tile in tiles) SizedBox(width: 180, child: tile),
+                  ],
+                )
+              : Column(children: tiles),
+        ),
+        if (field.error != null) _ErrorText(field.error!),
+      ],
+    );
+  }
+}
+
+/// Renders single-choice or multi-choice options as Material chips.
+final class MaterialChipFieldRenderer implements SkyloomFieldRenderer {
+  const MaterialChipFieldRenderer();
+
+  @override
+  Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
+    final schema = rendererContext.fieldSchema;
+    final field = rendererContext.fieldController;
+    final options = rendererContext.formController.optionsFor(
+      rendererContext.fieldPath,
+    );
+    final visualHints = rendererContext
+        .formController
+        .schema
+        .uiSchema[rendererContext.fieldPath]
+        ?.visualHints;
+    final multiSelect = visualHints?[FormUiHint.multiSelect] == true;
+    final selectedValues = field.value is List<Object?>
+        ? field.value! as List<Object?>
+        : const <Object?>[];
+    final editable = field.enabled && !field.readOnly;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (schema.label != null)
+          Text(schema.label!, style: Theme.of(context).textTheme.titleSmall),
+        if (schema.description != null) ...[
+          const SizedBox(height: 4),
+          Text(schema.description!),
+        ],
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in options)
+              if (multiSelect)
+                FilterChip(
+                  label: Text(option.label),
+                  selected: selectedValues.contains(option.value),
+                  onSelected: editable
+                      ? (selected) {
+                          final current = field.value is List<Object?>
+                              ? field.value! as List<Object?>
+                              : const <Object?>[];
+                          final next = [...current];
+                          if (selected) {
+                            if (!next.contains(option.value)) {
+                              next.add(thawJsonValue(option.value));
+                            }
+                          } else {
+                            next.remove(option.value);
+                          }
+                          rendererContext.setValue(next);
+                        }
+                      : null,
+                )
+              else
+                ChoiceChip(
+                  label: Text(option.label),
+                  selected: field.value == option.value,
+                  onSelected: editable
+                      ? (selected) => rendererContext.setValue(
+                          selected ? thawJsonValue(option.value) : null,
+                        )
+                      : null,
                 ),
-            ],
-          ),
+          ],
         ),
         if (field.error != null) _ErrorText(field.error!),
       ],

@@ -538,4 +538,120 @@ void main() {
       expect(calls, 2);
     },
   );
+
+  test(
+    'navigates, validates, conditions, and restores multi-step state',
+    () async {
+      final workflowSchema = const SchemaParser().parse({
+        'id': 'workflow',
+        'fields': [
+          {'key': 'kind', 'type': FormType.text},
+          {
+            'key': 'name',
+            'type': FormType.text,
+            'validation': {'required': true},
+          },
+          {
+            'key': 'company',
+            'type': FormType.text,
+            'validation': {'required': true},
+          },
+          {'key': 'email', 'type': FormType.email},
+        ],
+        'steps': [
+          {
+            'id': 'identity',
+            'fields': ['kind', 'name'],
+            'order': 1,
+          },
+          {
+            'id': 'business',
+            'fields': ['company'],
+            'order': 2,
+            'visibleWhen': {'field': 'kind', 'equals': 'business'},
+          },
+          {
+            'id': 'contact',
+            'fields': ['email'],
+            'order': 3,
+          },
+        ],
+      });
+      final controller = SkyloomFormController(schema: workflowSchema);
+      addTearDown(controller.dispose);
+
+      expect(controller.visibleSteps.map((step) => step.id), [
+        'identity',
+        'contact',
+      ]);
+      expect(await controller.nextStep(), isFalse);
+      expect(controller.errors['name'], isNotNull);
+
+      controller.setValue('name', 'Sky');
+      expect(controller.validate(), isTrue);
+      expect(controller.errors['company'], isNull);
+
+      controller.setValue('kind', 'business');
+      expect(controller.visibleSteps.map((step) => step.id), [
+        'identity',
+        'business',
+        'contact',
+      ]);
+      expect(await controller.nextStep(), isTrue);
+      expect(controller.currentStep?.id, 'business');
+
+      controller.setValue('company', 'Skyloom');
+      expect(await controller.nextStep(), isTrue);
+      controller.setValue('email', 'team@skyloom.dev');
+      final saved = controller.saveState();
+
+      controller
+        ..setValue('email', 'changed@example.com')
+        ..previousStep();
+      controller.restoreState(saved);
+      expect(controller.currentStep?.id, 'contact');
+      expect(controller.value('email'), 'team@skyloom.dev');
+    },
+  );
+
+  test('combines field and form-level errors', () {
+    final controller = SkyloomFormController(schema: schema);
+    addTearDown(controller.dispose);
+
+    controller
+      ..setError('email', 'Email is unavailable.')
+      ..setFormErrors(['The server rejected this request.'])
+      ..addFormError('Please try again.');
+
+    expect(controller.valid, isFalse);
+    expect(controller.formErrors, hasLength(2));
+    expect(controller.errorEntries, hasLength(3));
+    expect(controller.errorEntries.first.isFormError, isTrue);
+    expect(controller.firstErrorFieldKey, 'email');
+
+    controller.clearErrors();
+    expect(controller.errorEntries, isEmpty);
+  });
+
+  test(
+    'treats errors added by submit callbacks as a failed submission',
+    () async {
+      final controller = SkyloomFormController(
+        schema: schema,
+        initialValues: const {
+          'email': 'valid@example.com',
+          'acceptedTerms': true,
+        },
+      );
+      addTearDown(controller.dispose);
+
+      final result = await controller.submit((_) {
+        controller.setFormErrors(['The server rejected the form.']);
+      });
+
+      expect(result, isFalse);
+      expect(controller.submitted, isFalse);
+      expect(controller.formErrors, ['The server rejected the form.']);
+    },
+  );
 }

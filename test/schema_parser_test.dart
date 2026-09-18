@@ -378,5 +378,84 @@ void main() {
         throwsA(isA<SchemaParseException>()),
       );
     });
+
+    test('parses and round trips ordered conditional steps', () {
+      final source = {
+        'schemaVersion': '1.0',
+        'id': 'wizard',
+        'fields': [
+          {'key': 'kind', 'type': FormType.text},
+          {'key': 'details', 'type': FormType.text},
+        ],
+        'steps': [
+          {
+            'id': 'identity',
+            'title': 'Identity',
+            'fields': ['kind'],
+            'order': 1,
+          },
+          {
+            'id': 'details',
+            'title': 'Details',
+            'fields': ['details'],
+            'order': 2,
+            'visibleWhen': {'field': 'kind', 'equals': 'full'},
+          },
+        ],
+      };
+
+      final schema = parser.parse(source);
+
+      expect(schema.steps, hasLength(2));
+      expect(schema.steps.last.visibleWhen, {
+        'field': 'kind',
+        'equals': 'full',
+      });
+      expect(parser.parse(schema.toJson()).toJson(), source);
+    });
+
+    test('rejects duplicate and incomplete step field membership', () {
+      expect(
+        () => parser.parse({
+          'id': 'duplicate_steps',
+          'fields': [
+            {'key': 'name', 'type': FormType.text},
+          ],
+          'steps': [
+            {
+              'id': 'one',
+              'fields': ['name'],
+            },
+            {
+              'id': 'two',
+              'fields': ['name'],
+            },
+          ],
+        }),
+        throwsA(isA<SchemaParseException>()),
+      );
+      expect(
+        () => parser.parse({
+          'id': 'missing_step_field',
+          'fields': [
+            {'key': 'name', 'type': FormType.text},
+            {'key': 'email', 'type': FormType.email},
+          ],
+          'steps': [
+            {
+              'id': 'one',
+              'fields': ['name'],
+            },
+          ],
+        }),
+        throwsA(
+          isA<SchemaParseException>().having(
+            (error) => error.message,
+            'message',
+            contains('email'),
+          ),
+        ),
+      );
+    });
   });
 }

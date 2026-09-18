@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../controller/form_controller.dart';
 import '../engine/data_source.dart';
@@ -10,6 +11,7 @@ import '../registry/renderer_registry.dart';
 import '../schema/field_schema.dart';
 import '../schema/form_schema.dart';
 import '../schema/section_schema.dart';
+import '../schema/step_schema.dart';
 import 'field_renderer.dart';
 import 'material/material_renderers.dart';
 import 'renderer_context.dart';
@@ -21,6 +23,9 @@ enum SkyloomFormLayout {
 
   /// Wrap the form in a scroll view to prevent large-form overflow.
   scrollable,
+
+  /// Lazily builds top-level sections for very large forms.
+  lazy,
 }
 
 /// Builds a reactive Flutter form from a parsed [FormSchema].
@@ -40,10 +45,17 @@ final class SkyloomForm extends StatefulWidget {
     this.validationMode = SkyloomValidationMode.onChange,
     this.showSubmitButton = true,
     this.submitButtonLabel = 'Submit',
+    this.nextButtonLabel = 'Next',
+    this.backButtonLabel = 'Back',
+    this.showStepProgress = true,
+    this.showErrorSummary = true,
+    this.autoFocusFirstError = true,
+    this.onStepChanged,
     this.fieldSpacing = 16,
     this.layout = SkyloomFormLayout.scrollable,
     this.padding = EdgeInsets.zero,
     this.inputDecorationTheme,
+    this.cacheExtent,
     super.key,
   }) : _validateOnChangeOverride = validateOnChange;
 
@@ -63,10 +75,17 @@ final class SkyloomForm extends StatefulWidget {
     SkyloomValidationMode validationMode = SkyloomValidationMode.onChange,
     bool showSubmitButton = true,
     String submitButtonLabel = 'Submit',
+    String nextButtonLabel = 'Next',
+    String backButtonLabel = 'Back',
+    bool showStepProgress = true,
+    bool showErrorSummary = true,
+    bool autoFocusFirstError = true,
+    ValueChanged<StepSchema>? onStepChanged,
     double fieldSpacing = 16,
     SkyloomFormLayout layout = SkyloomFormLayout.scrollable,
     EdgeInsetsGeometry padding = EdgeInsets.zero,
     InputDecorationTheme? inputDecorationTheme,
+    double? cacheExtent,
     SchemaParser parser = const SchemaParser(),
     Key? key,
   }) {
@@ -86,10 +105,17 @@ final class SkyloomForm extends StatefulWidget {
       validationMode: validationMode,
       showSubmitButton: showSubmitButton,
       submitButtonLabel: submitButtonLabel,
+      nextButtonLabel: nextButtonLabel,
+      backButtonLabel: backButtonLabel,
+      showStepProgress: showStepProgress,
+      showErrorSummary: showErrorSummary,
+      autoFocusFirstError: autoFocusFirstError,
+      onStepChanged: onStepChanged,
       fieldSpacing: fieldSpacing,
       layout: layout,
       padding: padding,
       inputDecorationTheme: inputDecorationTheme,
+      cacheExtent: cacheExtent,
     );
   }
 
@@ -115,9 +141,16 @@ final class SkyloomForm extends StatefulWidget {
       validationMode == SkyloomValidationMode.onBlur;
   final bool showSubmitButton;
   final String submitButtonLabel;
+  final String nextButtonLabel;
+  final String backButtonLabel;
+  final bool showStepProgress;
+  final bool showErrorSummary;
+  final bool autoFocusFirstError;
+  final ValueChanged<StepSchema>? onStepChanged;
   final double fieldSpacing;
   final SkyloomFormLayout layout;
   final EdgeInsetsGeometry padding;
+  final double? cacheExtent;
 
   /// Optional Material input styling applied only inside this form.
   ///
@@ -134,6 +167,9 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   late SkyloomRendererRegistry _rendererRegistry;
   late bool _ownsController;
   late String _encodedValues;
+  String? _stepId;
+  final Map<String, GlobalKey> _fieldKeys = {};
+  final Map<String, ExpansibleController> _sectionControllers = {};
 
   @override
   void initState() {
@@ -194,6 +230,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
       );
     }
     _encodedValues = jsonEncode(_controller.values);
+    _stepId = _controller.currentStep?.id;
     _controller.addListener(_handleControllerChanged);
   }
 
@@ -205,6 +242,12 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   }
 
   void _handleControllerChanged() {
+    final step = _controller.currentStep;
+    if (_stepId != step?.id) {
+      _stepId = step?.id;
+      if (mounted) setState(() {});
+      if (step != null) widget.onStepChanged?.call(step);
+    }
     final values = _controller.values;
     final encodedValues = jsonEncode(values);
     if (_encodedValues == encodedValues) return;
@@ -213,12 +256,25 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   }
 
   Future<void> _submit() async {
+    final bool submitted;
     if (widget.validationMode == SkyloomValidationMode.manual) {
-      await _controller.submitWithoutValidation(widget.onSubmit);
+      submitted = await _controller.submitWithoutValidation(widget.onSubmit);
     } else {
-      await _controller.submit(widget.onSubmit);
+      submitted = await _controller.submit(widget.onSubmit);
+    }
+    if (!submitted || _controller.errorEntries.isNotEmpty) {
+      await _revealFirstError();
     }
   }
+
+  Future<void> _nextStep() async {
+    final moved = await _controller.nextStep(
+      validateCurrent: widget.validationMode != SkyloomValidationMode.manual,
+    );
+    if (!moved && !_controller.isLastStep) await _revealFirstError();
+  }
+
+  void _previousStep() => _controller.previousStep();
 
   Widget _buildField(FieldSchema fieldSchema, String parentPath) {
     final fieldPath = parentPath.isEmpty
@@ -241,18 +297,23 @@ final class _SkyloomFormState extends State<SkyloomForm> {
             ),
           );
         }
-        return Padding(
-          padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-          child: renderer.build(
-            context,
-            SkyloomRendererContext(
-              fieldSchema: fieldSchema,
-              fieldPath: fieldPath,
-              fieldController: fieldController,
-              formController: _controller,
-              buildChild: _buildField,
-              validateOnChange: widget.validateOnChange,
-              validateOnBlur: widget.validateOnBlur,
+        return KeyedSubtree(
+          key: _fieldKeys.putIfAbsent(fieldPath, GlobalKey.new),
+          child: RepaintBoundary(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+              child: renderer.build(
+                context,
+                SkyloomRendererContext(
+                  fieldSchema: fieldSchema,
+                  fieldPath: fieldPath,
+                  fieldController: fieldController,
+                  formController: _controller,
+                  buildChild: _buildField,
+                  validateOnChange: widget.validateOnChange,
+                  validateOnBlur: widget.validateOnBlur,
+                ),
+              ),
             ),
           ),
         );
@@ -333,28 +394,80 @@ final class _SkyloomFormState extends State<SkyloomForm> {
       borderRadius: BorderRadius.circular(16),
     );
     if (section.collapsible) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-        child: DecoratedBox(
-          decoration: decoration,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: ExpansionTile(
-              initiallyExpanded: section.defaultExpanded,
-              tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-              shape: const Border(),
-              collapsedShape: const Border(),
-              title: Text(
-                section.title ?? section.id,
-                style: Theme.of(context).textTheme.titleMedium,
+      return AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final errors = _sectionErrors(section);
+          final errorSummary = errors.isEmpty
+              ? null
+              : errors.length == 1
+              ? errors.first.value
+              : '${errors.first.value} (+${errors.length - 1} more)';
+          return Padding(
+            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+            child: DecoratedBox(
+              decoration: decoration,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: ExpansionTile(
+                  controller: _sectionControllers.putIfAbsent(
+                    section.id,
+                    ExpansibleController.new,
+                  ),
+                  initiallyExpanded: section.defaultExpanded,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: const Border(),
+                  collapsedShape: const Border(),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          section.title ?? section.id,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      if (errors.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.errorContainer,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${errors.length} ${errors.length == 1 ? 'error' : 'errors'}',
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(color: colors.onErrorContainer),
+                          ),
+                        ),
+                    ],
+                  ),
+                  subtitle: section.description == null && errorSummary == null
+                      ? null
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (section.description != null)
+                              Text(section.description!),
+                            if (errorSummary != null)
+                              Semantics(
+                                liveRegion: true,
+                                child: Text(
+                                  errorSummary,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: colors.error),
+                                ),
+                              ),
+                          ],
+                        ),
+                  children: [const Divider(height: 1), content],
+                ),
               ),
-              subtitle: section.description == null
-                  ? null
-                  : Text(section.description!),
-              children: [const Divider(height: 1), content],
             ),
-          ),
-        ),
+          );
+        },
       );
     }
     return Padding(
@@ -396,62 +509,300 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     );
   }
 
+  List<MapEntry<String, String>> _sectionErrors(SectionSchema section) {
+    return _controller.errors.entries.where((entry) {
+      return section.fields.any(
+        (field) =>
+            entry.key == field ||
+            entry.key.startsWith('$field.') ||
+            entry.key.startsWith('$field['),
+      );
+    }).toList();
+  }
+
   List<Widget> _buildSchemaContent() {
+    final allowedKeys = _controller.currentStep?.fields.toSet();
+    final visibleFields = allowedKeys == null
+        ? widget.schema.fields
+        : widget.schema.fields
+              .where((field) => allowedKeys.contains(field.key))
+              .toList();
     if (widget.schema.sections.isEmpty) {
-      return [_buildResponsiveFields(widget.schema.fields)];
+      return [_buildResponsiveFields(visibleFields)];
     }
     final byKey = {for (final field in widget.schema.fields) field.key: field};
-    final assigned = widget.schema.sections
-        .expand((section) => section.fields)
-        .toSet();
-    final sections = widget.schema.sections.toList()
-      ..sort((left, right) => left.order.compareTo(right.order));
+    final sections =
+        widget.schema.sections
+            .map(
+              (section) => MapEntry(
+                section,
+                section.fields
+                    .where(
+                      (key) => allowedKeys == null || allowedKeys.contains(key),
+                    )
+                    .toList(),
+              ),
+            )
+            .where((entry) => entry.value.isNotEmpty)
+            .toList()
+          ..sort((left, right) => left.key.order.compareTo(right.key.order));
+    final assigned = sections.expand((entry) => entry.value).toSet();
     return [
-      for (final section in sections)
-        _buildSection(section, [for (final key in section.fields) byKey[key]!]),
-      if (assigned.length < widget.schema.fields.length)
+      for (final entry in sections)
+        _buildSection(entry.key, [for (final key in entry.value) byKey[key]!]),
+      if (assigned.length < visibleFields.length)
         _buildResponsiveFields(
-          widget.schema.fields
+          visibleFields
               .where((field) => !assigned.contains(field.key))
               .toList(),
         ),
     ];
   }
 
+  Widget _buildStepProgress() {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final step = _controller.currentStep;
+        final steps = _controller.visibleSteps;
+        if (step == null || steps.isEmpty || !widget.showStepProgress) {
+          return const SizedBox.shrink();
+        }
+        final index = _controller.currentStepIndex;
+        final label = 'Step ${index + 1} of ${steps.length}';
+        return Semantics(
+          container: true,
+          label: '$label: ${step.title ?? step.id}',
+          child: Padding(
+            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        step.title ?? step.id,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    Text(label),
+                  ],
+                ),
+                if (step.description != null) ...[
+                  const SizedBox(height: 4),
+                  Text(step.description!),
+                ],
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: (index + 1) / steps.length,
+                  semanticsLabel: label,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildErrorSummary() {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final errors = _controller.errorEntries;
+        if (!widget.showErrorSummary || errors.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final colors = Theme.of(context).colorScheme;
+        return Semantics(
+          container: true,
+          liveRegion: true,
+          label:
+              '${errors.length} form ${errors.length == 1 ? 'error' : 'errors'}',
+          child: Padding(
+            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Please review ${errors.length} ${errors.length == 1 ? 'error' : 'errors'}',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colors.onErrorContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    for (final error in errors)
+                      if (error.fieldKey == null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            error.message,
+                            style: TextStyle(color: colors.onErrorContainer),
+                          ),
+                        )
+                      else
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: colors.onErrorContainer,
+                              padding: const EdgeInsets.only(top: 8),
+                            ),
+                            onPressed: () => _revealError(error.fieldKey!),
+                            icon: const Icon(Icons.arrow_forward, size: 16),
+                            label: Text(
+                              '${_controller.field(error.fieldKey!).schema.label ?? error.fieldKey}: ${error.message}',
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActions() {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        if (!widget.showSubmitButton) return const SizedBox.shrink();
+        final hasSteps = _controller.hasSteps;
+        final showSubmit = !hasSteps || _controller.isLastStep;
+        if (showSubmit && widget.onSubmit == null) {
+          return const SizedBox.shrink();
+        }
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            if (hasSteps && !_controller.isFirstStep)
+              OutlinedButton(
+                onPressed: _controller.submitting ? null : _previousStep,
+                child: Text(widget.backButtonLabel),
+              ),
+            if (hasSteps && !_controller.isFirstStep) const SizedBox(width: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 120),
+              child: FilledButton(
+                onPressed: _controller.submitting
+                    ? null
+                    : showSubmit
+                    ? _submit
+                    : _nextStep,
+                child: _controller.submitting
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        showSubmit
+                            ? widget.submitButtonLabel
+                            : widget.nextButtonLabel,
+                      ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _revealFirstError() async {
+    if (!widget.autoFocusFirstError) return;
+    final key = _controller.firstErrorFieldKey;
+    if (key != null) await _revealError(key);
+  }
+
+  Future<void> _revealError(String fieldPath) async {
+    final root = fieldPath.split('.').first.split('[').first;
+    for (final step in _controller.visibleSteps) {
+      if (step.fields.contains(root)) {
+        await _controller.goToStep(step.id);
+        break;
+      }
+    }
+    await WidgetsBinding.instance.endOfFrame;
+    for (final section in widget.schema.sections) {
+      if (section.fields.contains(root) && section.collapsible) {
+        _sectionControllers[section.id]?.expand();
+        break;
+      }
+    }
+    await WidgetsBinding.instance.endOfFrame;
+    final fieldContext =
+        _fieldKeys[fieldPath]?.currentContext ??
+        _fieldKeys[root]?.currentContext;
+    if (fieldContext == null || !fieldContext.mounted) return;
+    await Scrollable.ensureVisible(
+      fieldContext,
+      alignment: 0.15,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+    if (!fieldContext.mounted) return;
+    _requestDescendantFocus(fieldContext);
+  }
+
+  void _requestDescendantFocus(BuildContext context) {
+    FocusNode? target;
+    void visit(Element element) {
+      if (target != null) return;
+      final child = element.widget;
+      if (child is EditableText) {
+        target = child.focusNode;
+        return;
+      }
+      if (child is Focus && child.focusNode != null) {
+        target = child.focusNode;
+        return;
+      }
+      element.visitChildElements(visit);
+    }
+
+    (context as Element).visitChildElements(visit);
+    target?.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
-    Widget content = FocusTraversalGroup(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ..._buildSchemaContent(),
-          if (widget.showSubmitButton && widget.onSubmit != null)
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                return Align(
-                  alignment: Alignment.centerRight,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minWidth: 160,
-                      maxWidth: 240,
-                    ),
-                    child: FilledButton(
-                      onPressed: _controller.submitting ? null : _submit,
-                      child: _controller.submitting
-                          ? const SizedBox.square(
-                              dimension: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(widget.submitButtonLabel),
-                    ),
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
+    final children = <Widget>[
+      if (_controller.hasSteps) _buildStepProgress(),
+      _buildErrorSummary(),
+      ..._buildSchemaContent(),
+      _buildActions(),
+    ];
+    Widget content;
+    if (widget.layout == SkyloomFormLayout.lazy) {
+      content = FocusTraversalGroup(
+        child: ListView.builder(
+          padding: widget.padding,
+          scrollCacheExtent: widget.cacheExtent == null
+              ? null
+              : ScrollCacheExtent.pixels(widget.cacheExtent!),
+          itemCount: children.length,
+          itemBuilder: (context, index) =>
+              RepaintBoundary(child: children[index]),
+        ),
+      );
+    } else {
+      content = FocusTraversalGroup(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      );
+    }
 
     if (widget.inputDecorationTheme != null) {
       content = Theme(
@@ -461,7 +812,8 @@ final class _SkyloomFormState extends State<SkyloomForm> {
         child: content,
       );
     }
-    if (widget.padding != EdgeInsets.zero) {
+    if (widget.layout != SkyloomFormLayout.lazy &&
+        widget.padding != EdgeInsets.zero) {
       content = Padding(padding: widget.padding, child: content);
     }
     if (widget.layout == SkyloomFormLayout.scrollable) {
@@ -473,6 +825,9 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   @override
   void dispose() {
     _detachController();
+    for (final controller in _sectionControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 }
