@@ -654,4 +654,118 @@ void main() {
       expect(controller.formErrors, ['The server rejected the form.']);
     },
   );
+
+  test('applies structured backend errors and reports unknown fields', () {
+    final controller = SkyloomFormController(schema: schema);
+    addTearDown(controller.dispose);
+
+    final result = controller.applyErrors(
+      fieldErrors: const {
+        'email': ['Already registered.', 'Use another address.'],
+        'legacyId': ['This field no longer exists.'],
+      },
+      formErrors: const ['Unable to create employee.'],
+    );
+
+    expect(result.appliedFields, ['email']);
+    expect(result.unknownFields, ['legacyId']);
+    expect(
+      controller.errors['email'],
+      'Already registered.\nUse another address.',
+    );
+    expect(controller.formErrors, [
+      'Unable to create employee.',
+      'legacyId: This field no longer exists.',
+    ]);
+
+    controller.setError('name', 'Keep this error.');
+    expect(
+      () => controller.applyErrors(
+        fieldErrors: const {
+          'missing': ['Unknown field.'],
+        },
+        unknownFieldPolicy: SkyloomUnknownFieldErrorPolicy.throwException,
+      ),
+      throwsArgumentError,
+    );
+    expect(controller.errors['name'], 'Keep this error.');
+  });
+
+  test('emits renderer-independent field navigation requests', () {
+    final controller = SkyloomFormController(schema: schema);
+    addTearDown(controller.dispose);
+
+    controller.revealField('email');
+    final reveal = controller.fieldNavigationRequest!;
+    expect(reveal.fieldPath, 'email');
+    expect(reveal.intent, SkyloomFieldNavigationIntent.reveal);
+
+    controller.focusField('name');
+    final focus = controller.fieldNavigationRequest!;
+    expect(focus.id, greaterThan(reveal.id));
+    expect(focus.fieldPath, 'name');
+    expect(focus.requestsFocus, isTrue);
+    expect(
+      () => controller.revealField('missing'),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
+  test('guards step transitions and tracks completed steps', () async {
+    final changes = <SkyloomStepChange>[];
+    Completer<bool>? pendingGuard;
+    final guardedSchema = const SchemaParser().parse({
+      'id': 'guarded_steps',
+      'fields': [
+        {
+          'key': 'name',
+          'type': FormType.text,
+          'validation': {'required': true},
+        },
+        {'key': 'email', 'type': FormType.email},
+      ],
+      'steps': [
+        {
+          'id': 'identity',
+          'fields': ['name'],
+        },
+        {
+          'id': 'contact',
+          'fields': ['email'],
+        },
+      ],
+    });
+    final controller = SkyloomFormController(
+      schema: guardedSchema,
+      initialValues: const {'name': 'Sky'},
+      onStepChanging: (change) {
+        changes.add(change);
+        pendingGuard = Completer<bool>();
+        return pendingGuard!.future;
+      },
+    );
+    addTearDown(controller.dispose);
+
+    final blocked = controller.nextStep();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.navigatingSteps, isTrue);
+    pendingGuard!.complete(false);
+    expect(await blocked, isFalse);
+    expect(controller.currentStep?.id, 'identity');
+
+    final allowed = controller.nextStep();
+    await Future<void>.delayed(Duration.zero);
+    pendingGuard!.complete(true);
+    expect(await allowed, isTrue);
+    expect(controller.currentStep?.id, 'contact');
+    expect(controller.isStepComplete('identity'), isTrue);
+    expect(changes.last.direction, SkyloomStepDirection.forward);
+
+    final previous = controller.previousStep();
+    await Future<void>.delayed(Duration.zero);
+    pendingGuard!.complete(true);
+    await previous;
+    controller.setValue('name', 'Changed');
+    expect(controller.isStepComplete('identity'), isFalse);
+  });
 }

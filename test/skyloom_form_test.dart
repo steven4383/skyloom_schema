@@ -705,4 +705,66 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('controller focusField navigates, expands, and focuses', (
+    tester,
+  ) async {
+    final parsed = const SchemaParser().parse({
+      'id': 'field_navigation',
+      'fields': [
+        {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+        {'key': 'email', 'type': FormType.email, 'label': 'Email'},
+      ],
+      'sections': [
+        {
+          'id': 'identity',
+          'fields': ['name'],
+        },
+        {
+          'id': 'contact_section',
+          'title': 'Contact section',
+          'fields': ['email'],
+          'collapsible': true,
+          'defaultExpanded': false,
+        },
+      ],
+      'steps': [
+        {
+          'id': 'identity_step',
+          'title': 'Identity',
+          'fields': ['name'],
+        },
+        {
+          'id': 'contact_step',
+          'title': 'Contact',
+          'fields': ['email'],
+        },
+      ],
+    });
+    final controller = SkyloomFormController(schema: parsed);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm(
+            schema: parsed,
+            controller: controller,
+            layout: SkyloomFormLayout.column,
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    controller.focusField('email');
+    await tester.pumpAndSettle();
+
+    expect(controller.currentStep?.id, 'contact_step');
+    expect(find.byType(TextField), findsOneWidget);
+    expect(
+      tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus,
+      isTrue,
+    );
+  });
 }

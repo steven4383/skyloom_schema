@@ -256,6 +256,7 @@ class _EmployeeFormPageState extends State<EmployeeFormPage> {
             SkyloomForm.fromJson(
               schema: employeeSchema,
               layout: SkyloomFormLayout.column,
+              allowStepNavigation: true,
               padding: const EdgeInsets.all(4),
               inputDecorationTheme: const InputDecorationTheme(
                 border: OutlineInputBorder(),

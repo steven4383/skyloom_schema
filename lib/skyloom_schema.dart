@@ -2,7 +2,10 @@
 library;
 
 export 'src/controller/field_controller.dart';
+export 'src/controller/field_navigation.dart';
+export 'src/controller/form_error.dart';
 export 'src/controller/form_controller.dart';
+export 'src/controller/step_navigation.dart';
 export 'src/engine/condition_engine.dart';
 export 'src/engine/data_source.dart';
 export 'src/engine/async_validation.dart';

@@ -1,3 +1,16 @@
+## 0.10.0-dev.1
+
+- Begin the non-breaking Part 1 architecture split with dedicated Material
+  step-progress, error-summary, and action components.
+- Add controller-driven reveal and focus requests that the Material renderer
+  fulfills across steps and collapsed sections.
+- Add structured backend error application with multiple messages and
+  configurable unknown-field handling.
+- Add asynchronous step-transition guards, navigation loading state,
+  completed-step tracking, step error counts, and optional progress-chip
+  navigation.
+- Add the horizontal green woven-thread Skyloom logo as an editable SVG vector, with a PNG package preview.
+
 ## 0.9.2
 
 - Add lazy top-level form rendering and configurable scroll cache extent for

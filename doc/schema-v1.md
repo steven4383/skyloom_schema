@@ -1,7 +1,7 @@
 # Skyloom form schema 1.0
 
 This document defines the foundation schema supported by
-`skyloom_schema` 0.9.2. The contract remains forward-compatible: unknown
+`skyloom_schema` 0.10.0-dev.1. The contract remains forward-compatible: unknown
 properties are preserved during parsing and serialization.
 
 ## Form object

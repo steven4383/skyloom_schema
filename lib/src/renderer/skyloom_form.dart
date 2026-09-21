@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../controller/form_controller.dart';
+import '../controller/field_navigation.dart';
+import '../controller/step_navigation.dart';
 import '../engine/data_source.dart';
 import '../engine/validation_mode.dart';
 import '../parser/schema_parser.dart';
@@ -13,6 +16,9 @@ import '../schema/form_schema.dart';
 import '../schema/section_schema.dart';
 import '../schema/step_schema.dart';
 import 'field_renderer.dart';
+import 'material/form_actions.dart';
+import 'material/form_error_summary.dart';
+import 'material/form_step_progress.dart';
 import 'material/material_renderers.dart';
 import 'renderer_context.dart';
 
@@ -41,6 +47,7 @@ final class SkyloomForm extends StatefulWidget {
     this.dataSources = const {},
     this.asyncValidators = const {},
     this.onDependencyChanged,
+    this.onStepChanging,
     bool? validateOnChange,
     this.validationMode = SkyloomValidationMode.onChange,
     this.showSubmitButton = true,
@@ -48,6 +55,7 @@ final class SkyloomForm extends StatefulWidget {
     this.nextButtonLabel = 'Next',
     this.backButtonLabel = 'Back',
     this.showStepProgress = true,
+    this.allowStepNavigation = false,
     this.showErrorSummary = true,
     this.autoFocusFirstError = true,
     this.onStepChanged,
@@ -71,6 +79,7 @@ final class SkyloomForm extends StatefulWidget {
     Map<String, SkyloomDataSource> dataSources = const {},
     Map<String, SkyloomAsyncValidator> asyncValidators = const {},
     SkyloomDependencyCallback? onDependencyChanged,
+    SkyloomStepGuard? onStepChanging,
     bool? validateOnChange,
     SkyloomValidationMode validationMode = SkyloomValidationMode.onChange,
     bool showSubmitButton = true,
@@ -78,6 +87,7 @@ final class SkyloomForm extends StatefulWidget {
     String nextButtonLabel = 'Next',
     String backButtonLabel = 'Back',
     bool showStepProgress = true,
+    bool allowStepNavigation = false,
     bool showErrorSummary = true,
     bool autoFocusFirstError = true,
     ValueChanged<StepSchema>? onStepChanged,
@@ -101,6 +111,7 @@ final class SkyloomForm extends StatefulWidget {
       dataSources: dataSources,
       asyncValidators: asyncValidators,
       onDependencyChanged: onDependencyChanged,
+      onStepChanging: onStepChanging,
       validateOnChange: validateOnChange,
       validationMode: validationMode,
       showSubmitButton: showSubmitButton,
@@ -108,6 +119,7 @@ final class SkyloomForm extends StatefulWidget {
       nextButtonLabel: nextButtonLabel,
       backButtonLabel: backButtonLabel,
       showStepProgress: showStepProgress,
+      allowStepNavigation: allowStepNavigation,
       showErrorSummary: showErrorSummary,
       autoFocusFirstError: autoFocusFirstError,
       onStepChanged: onStepChanged,
@@ -131,6 +143,7 @@ final class SkyloomForm extends StatefulWidget {
   final Map<String, SkyloomDataSource> dataSources;
   final Map<String, SkyloomAsyncValidator> asyncValidators;
   final SkyloomDependencyCallback? onDependencyChanged;
+  final SkyloomStepGuard? onStepChanging;
   final bool? _validateOnChangeOverride;
   final SkyloomValidationMode validationMode;
   bool get validateOnChange =>
@@ -144,6 +157,7 @@ final class SkyloomForm extends StatefulWidget {
   final String nextButtonLabel;
   final String backButtonLabel;
   final bool showStepProgress;
+  final bool allowStepNavigation;
   final bool showErrorSummary;
   final bool autoFocusFirstError;
   final ValueChanged<StepSchema>? onStepChanged;
@@ -170,6 +184,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   String? _stepId;
   final Map<String, GlobalKey> _fieldKeys = {};
   final Map<String, ExpansibleController> _sectionControllers = {};
+  int _handledFieldNavigationRequestId = 0;
 
   @override
   void initState() {
@@ -191,7 +206,8 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (oldWidget.controller != widget.controller ||
         schemaChanged ||
         initialValuesChanged ||
-        oldWidget.onDependencyChanged != widget.onDependencyChanged) {
+        oldWidget.onDependencyChanged != widget.onDependencyChanged ||
+        oldWidget.onStepChanging != widget.onStepChanging) {
       _detachController();
       _attachController();
     } else if (_ownsController && oldWidget.validators != widget.validators) {
@@ -222,6 +238,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
           dataSources: widget.dataSources,
           asyncValidators: widget.asyncValidators,
           onDependencyChanged: widget.onDependencyChanged,
+          onStepChanging: widget.onStepChanging,
         );
     if (_controller.schema.id != widget.schema.id) {
       throw ArgumentError(
@@ -231,6 +248,12 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     }
     _encodedValues = jsonEncode(_controller.values);
     _stepId = _controller.currentStep?.id;
+    final request = _controller.fieldNavigationRequest;
+    if (request != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleFieldNavigationRequest(request);
+      });
+    }
     _controller.addListener(_handleControllerChanged);
   }
 
@@ -242,6 +265,13 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   }
 
   void _handleControllerChanged() {
+    final navigationRequest = _controller.fieldNavigationRequest;
+    if (navigationRequest != null &&
+        navigationRequest.id > _handledFieldNavigationRequestId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleFieldNavigationRequest(navigationRequest);
+      });
+    }
     final step = _controller.currentStep;
     if (_stepId != step?.id) {
       _stepId = step?.id;
@@ -253,6 +283,14 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (_encodedValues == encodedValues) return;
     _encodedValues = encodedValues;
     widget.onChanged?.call(values);
+  }
+
+  void _handleFieldNavigationRequest(SkyloomFieldNavigationRequest request) {
+    if (!mounted || request.id <= _handledFieldNavigationRequestId) return;
+    _handledFieldNavigationRequestId = request.id;
+    unawaited(
+      _revealError(request.fieldPath, requestFocus: request.requestsFocus),
+    );
   }
 
   Future<void> _submit() async {
@@ -274,7 +312,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (!moved && !_controller.isLastStep) await _revealFirstError();
   }
 
-  void _previousStep() => _controller.previousStep();
+  void _previousStep() => unawaited(_controller.previousStep());
 
   Widget _buildField(FieldSchema fieldSchema, String parentPath) {
     final fieldPath = parentPath.isEmpty
@@ -560,161 +598,36 @@ final class _SkyloomFormState extends State<SkyloomForm> {
   }
 
   Widget _buildStepProgress() {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final step = _controller.currentStep;
-        final steps = _controller.visibleSteps;
-        if (step == null || steps.isEmpty || !widget.showStepProgress) {
-          return const SizedBox.shrink();
-        }
-        final index = _controller.currentStepIndex;
-        final label = 'Step ${index + 1} of ${steps.length}';
-        return Semantics(
-          container: true,
-          label: '$label: ${step.title ?? step.id}',
-          child: Padding(
-            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        step.title ?? step.id,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    Text(label),
-                  ],
-                ),
-                if (step.description != null) ...[
-                  const SizedBox(height: 4),
-                  Text(step.description!),
-                ],
-                const SizedBox(height: 12),
-                LinearProgressIndicator(
-                  value: (index + 1) / steps.length,
-                  semanticsLabel: label,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    return SkyloomMaterialStepProgress(
+      controller: _controller,
+      visible: widget.showStepProgress,
+      allowNavigation: widget.allowStepNavigation,
+      bottomSpacing: widget.fieldSpacing,
     );
   }
 
   Widget _buildErrorSummary() {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final errors = _controller.errorEntries;
-        if (!widget.showErrorSummary || errors.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        final colors = Theme.of(context).colorScheme;
-        return Semantics(
-          container: true,
-          liveRegion: true,
-          label:
-              '${errors.length} form ${errors.length == 1 ? 'error' : 'errors'}',
-          child: Padding(
-            padding: EdgeInsets.only(bottom: widget.fieldSpacing),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.errorContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Please review ${errors.length} ${errors.length == 1 ? 'error' : 'errors'}',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colors.onErrorContainer,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    for (final error in errors)
-                      if (error.fieldKey == null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            error.message,
-                            style: TextStyle(color: colors.onErrorContainer),
-                          ),
-                        )
-                      else
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            style: TextButton.styleFrom(
-                              foregroundColor: colors.onErrorContainer,
-                              padding: const EdgeInsets.only(top: 8),
-                            ),
-                            onPressed: () => _revealError(error.fieldKey!),
-                            icon: const Icon(Icons.arrow_forward, size: 16),
-                            label: Text(
-                              '${_controller.field(error.fieldKey!).schema.label ?? error.fieldKey}: ${error.message}',
-                            ),
-                          ),
-                        ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+    return SkyloomMaterialErrorSummary(
+      controller: _controller,
+      visible: widget.showErrorSummary,
+      bottomSpacing: widget.fieldSpacing,
+      fieldLabel: (fieldPath) =>
+          _controller.field(fieldPath).schema.label ?? fieldPath,
+      onReveal: (fieldPath) => unawaited(_revealError(fieldPath)),
     );
   }
 
   Widget _buildActions() {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        if (!widget.showSubmitButton) return const SizedBox.shrink();
-        final hasSteps = _controller.hasSteps;
-        final showSubmit = !hasSteps || _controller.isLastStep;
-        if (showSubmit && widget.onSubmit == null) {
-          return const SizedBox.shrink();
-        }
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            if (hasSteps && !_controller.isFirstStep)
-              OutlinedButton(
-                onPressed: _controller.submitting ? null : _previousStep,
-                child: Text(widget.backButtonLabel),
-              ),
-            if (hasSteps && !_controller.isFirstStep) const SizedBox(width: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 120),
-              child: FilledButton(
-                onPressed: _controller.submitting
-                    ? null
-                    : showSubmit
-                    ? _submit
-                    : _nextStep,
-                child: _controller.submitting
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        showSubmit
-                            ? widget.submitButtonLabel
-                            : widget.nextButtonLabel,
-                      ),
-              ),
-            ),
-          ],
-        );
-      },
+    return SkyloomMaterialFormActions(
+      controller: _controller,
+      visible: widget.showSubmitButton,
+      canSubmit: widget.onSubmit != null,
+      submitLabel: widget.submitButtonLabel,
+      nextLabel: widget.nextButtonLabel,
+      backLabel: widget.backButtonLabel,
+      onSubmit: () => unawaited(_submit()),
+      onNext: () => unawaited(_nextStep()),
+      onBack: _previousStep,
     );
   }
 
@@ -724,7 +637,10 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (key != null) await _revealError(key);
   }
 
-  Future<void> _revealError(String fieldPath) async {
+  Future<void> _revealError(
+    String fieldPath, {
+    bool requestFocus = true,
+  }) async {
     final root = fieldPath.split('.').first.split('[').first;
     for (final step in _controller.visibleSteps) {
       if (step.fields.contains(root)) {
@@ -751,7 +667,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
       curve: Curves.easeOut,
     );
     if (!fieldContext.mounted) return;
-    _requestDescendantFocus(fieldContext);
+    if (requestFocus) _requestDescendantFocus(fieldContext);
   }
 
   void _requestDescendantFocus(BuildContext context) {

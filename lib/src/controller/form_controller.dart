@@ -17,6 +17,9 @@ import '../schema/validation_rule.dart';
 import '../utils/json_value_utils.dart';
 import '../utils/path_utils.dart';
 import 'field_controller.dart';
+import 'field_navigation.dart';
+import 'form_error.dart';
+import 'step_navigation.dart';
 
 const Object _unsetArrayItem = Object();
 
@@ -78,17 +81,6 @@ final class SkyloomDependencyChange {
   final SkyloomFormController formController;
 }
 
-/// A normalized field-level or form-level validation error.
-final class SkyloomErrorEntry {
-  const SkyloomErrorEntry({required this.message, this.fieldKey});
-
-  /// Null for a form-level error.
-  final String? fieldKey;
-  final String message;
-
-  bool get isFormError => fieldKey == null;
-}
-
 /// Coordinates recursive field state, values, validation, and dependencies.
 final class SkyloomFormController extends ChangeNotifier {
   SkyloomFormController({
@@ -100,6 +92,7 @@ final class SkyloomFormController extends ChangeNotifier {
     Map<String, SkyloomDataSource> dataSources = const {},
     Map<String, SkyloomAsyncValidator> asyncValidators = const {},
     this.onDependencyChanged,
+    this.onStepChanging,
   }) : _validators = Map<String, SkyloomValidator>.unmodifiable(validators),
        _dataSources = Map<String, SkyloomDataSource>.unmodifiable(dataSources),
        _asyncValidators = Map<String, SkyloomAsyncValidator>.unmodifiable(
@@ -117,6 +110,7 @@ final class SkyloomFormController extends ChangeNotifier {
   final ValidationEngine validationEngine;
   final ConditionEngine conditionEngine;
   final SkyloomDependencyCallback? onDependencyChanged;
+  final SkyloomStepGuard? onStepChanging;
 
   Map<String, SkyloomValidator> _validators;
   Map<String, SkyloomDataSource> _dataSources;
@@ -135,6 +129,7 @@ final class SkyloomFormController extends ChangeNotifier {
   final Map<String, Timer> _asyncValidationTimers = {};
   final List<String> _formErrors = [];
   List<StepSchema> _visibleSteps = const [];
+  final Set<String> _completedStepIds = {};
 
   bool _submitting = false;
   bool _submitted = false;
@@ -144,6 +139,9 @@ final class SkyloomFormController extends ChangeNotifier {
   int _batchDepth = 0;
   bool _batchNotificationPending = false;
   String? _currentStepId;
+  bool _navigatingSteps = false;
+  int _navigationRequestId = 0;
+  SkyloomFieldNavigationRequest? _fieldNavigationRequest;
 
   Map<String, SkyloomValidator> get validators => _validators;
   Map<String, SkyloomDataSource> get dataSources => _dataSources;
@@ -210,6 +208,12 @@ final class SkyloomFormController extends ChangeNotifier {
   bool get submitting => _submitting;
   bool get submitted => _submitted;
   bool get loading => _loading || _fields.values.any((field) => field.loading);
+  bool get navigatingSteps => _navigatingSteps;
+  Set<String> get completedStepIds => Set<String>.unmodifiable(
+    _completedStepIds.where((id) => visibleSteps.any((step) => step.id == id)),
+  );
+  SkyloomFieldNavigationRequest? get fieldNavigationRequest =>
+      _fieldNavigationRequest;
 
   Map<String, String> get errors => <String, String>{
     for (final field in _fields.values)
@@ -259,6 +263,25 @@ final class SkyloomFormController extends ChangeNotifier {
   bool get isFirstStep => !hasSteps || currentStepIndex <= 0;
   bool get isLastStep =>
       !hasSteps || currentStepIndex == visibleSteps.length - 1;
+
+  bool isStepComplete(String stepId) => _completedStepIds.contains(stepId);
+
+  int stepErrorCount(String stepId) {
+    final step = schema.steps.where((candidate) => candidate.id == stepId);
+    if (step.isEmpty) return 0;
+    final roots = step.first.fields.toSet();
+    return errors.keys.where((key) => _belongsToRoots(key, roots)).length;
+  }
+
+  /// Requests that an attached renderer scroll [fieldPath] into view.
+  void revealField(String fieldPath) {
+    _requestFieldNavigation(fieldPath, SkyloomFieldNavigationIntent.reveal);
+  }
+
+  /// Requests that an attached renderer reveal and focus [fieldPath].
+  void focusField(String fieldPath) {
+    _requestFieldNavigation(fieldPath, SkyloomFieldNavigationIntent.focus);
+  }
 
   void setValue(String key, Object? value, {bool markTouched = true}) {
     final target = field(key);
@@ -376,6 +399,74 @@ final class SkyloomFormController extends ChangeNotifier {
         setError(entry.key, entry.value);
       }
     });
+  }
+
+  /// Applies a structured backend validation response in one notification.
+  SkyloomAppliedErrors applyErrors({
+    Map<String, Iterable<String>> fieldErrors = const {},
+    Iterable<String> formErrors = const [],
+    SkyloomUnknownFieldErrorPolicy unknownFieldPolicy =
+        SkyloomUnknownFieldErrorPolicy.formError,
+    bool clearExisting = true,
+  }) {
+    final applied = <String>[];
+    final unknown = <String>[];
+    final normalizedFormErrors = formErrors
+        .map((message) => message.trim())
+        .where((message) => message.isNotEmpty)
+        .toList();
+    final normalizedFieldErrors = <String, List<String>>{
+      for (final entry in fieldErrors.entries)
+        entry.key: entry.value
+            .map((message) => message.trim())
+            .where((message) => message.isNotEmpty)
+            .toList(),
+    };
+    if (unknownFieldPolicy == SkyloomUnknownFieldErrorPolicy.throwException) {
+      final unknownKey = normalizedFieldErrors.entries
+          .where((entry) => entry.value.isNotEmpty)
+          .map((entry) => entry.key)
+          .where((key) => !_fields.containsKey(key))
+          .firstOrNull;
+      if (unknownKey != null) {
+        throw ArgumentError.value(
+          unknownKey,
+          'fieldErrors',
+          'Backend error references an unknown schema field.',
+        );
+      }
+    }
+
+    _runBatch(() {
+      if (clearExisting) {
+        for (final target in _fields.values) {
+          target.clearError();
+        }
+        _formErrors.clear();
+      }
+      for (final entry in normalizedFieldErrors.entries) {
+        final messages = entry.value;
+        if (messages.isEmpty) continue;
+        final target = _fields[entry.key];
+        if (target != null) {
+          target.setError(messages.join('\n'));
+          applied.add(entry.key);
+          continue;
+        }
+        unknown.add(entry.key);
+        switch (unknownFieldPolicy) {
+          case SkyloomUnknownFieldErrorPolicy.throwException:
+            break;
+          case SkyloomUnknownFieldErrorPolicy.formError:
+            normalizedFormErrors.add('${entry.key}: ${messages.join(' ')}');
+          case SkyloomUnknownFieldErrorPolicy.ignore:
+            break;
+        }
+      }
+      _formErrors.addAll(normalizedFormErrors);
+      _markChanged();
+    });
+    return SkyloomAppliedErrors(appliedFields: applied, unknownFields: unknown);
   }
 
   void clearError(String key) => field(key).clearError();
@@ -698,7 +789,7 @@ final class SkyloomFormController extends ChangeNotifier {
   /// Validates the current step and advances when it is valid.
   Future<bool> nextStep({bool validateCurrent = true}) async {
     final step = currentStep;
-    if (step == null || isLastStep) return false;
+    if (step == null || isLastStep || _navigatingSteps) return false;
     if (validateCurrent) {
       _markFieldsTouched(step.fields);
       if (!validateCurrentStep()) return false;
@@ -707,22 +798,28 @@ final class SkyloomFormController extends ChangeNotifier {
     final steps = visibleSteps;
     final index = steps.indexWhere((candidate) => candidate.id == step.id);
     if (index < 0 || index + 1 >= steps.length) return false;
-    _currentStepId = steps[index + 1].id;
-    _markChanged();
-    return true;
+    return _transitionTo(
+      steps[index + 1],
+      direction: SkyloomStepDirection.forward,
+      completedStepId: step.id,
+    );
   }
 
-  bool previousStep() {
+  Future<bool> previousStep() {
     final steps = visibleSteps;
     final index = currentStepIndex;
-    if (index <= 0 || index >= steps.length) return false;
-    _currentStepId = steps[index - 1].id;
-    _markChanged();
-    return true;
+    if (index <= 0 || index >= steps.length || _navigatingSteps) {
+      return Future<bool>.value(false);
+    }
+    return _transitionTo(
+      steps[index - 1],
+      direction: SkyloomStepDirection.backward,
+    );
   }
 
   /// Navigates to a visible step by id.
   Future<bool> goToStep(String stepId, {bool validateCurrent = false}) async {
+    if (_navigatingSteps) return false;
     final steps = visibleSteps;
     final destination = steps.indexWhere((step) => step.id == stepId);
     if (destination < 0) return false;
@@ -737,9 +834,19 @@ final class SkyloomFormController extends ChangeNotifier {
       }
     }
     if (_currentStepId == stepId) return true;
-    _currentStepId = stepId;
-    _markChanged();
-    return true;
+    final direction = destination > currentStepIndex
+        ? SkyloomStepDirection.forward
+        : destination < currentStepIndex
+        ? SkyloomStepDirection.backward
+        : SkyloomStepDirection.direct;
+    return _transitionTo(
+      steps[destination],
+      direction: direction,
+      completedStepId:
+          validateCurrent && direction == SkyloomStepDirection.forward
+          ? currentStep?.id
+          : null,
+    );
   }
 
   /// JSON-compatible workflow snapshot suitable for local persistence.
@@ -748,6 +855,8 @@ final class SkyloomFormController extends ChangeNotifier {
     'schemaVersion': schema.schemaVersion,
     'values': values,
     if (currentStep != null) 'currentStepId': currentStep!.id,
+    if (_completedStepIds.isNotEmpty)
+      'completedStepIds': _completedStepIds.toList(),
   };
 
   /// Restores values and the saved step when that step is currently visible.
@@ -780,6 +889,16 @@ final class SkyloomFormController extends ChangeNotifier {
       } else {
         _reconcileCurrentStep(forceFirst: true);
       }
+      final completed = state['completedStepIds'];
+      _completedStepIds
+        ..clear()
+        ..addAll(
+          completed is List<Object?>
+              ? completed.whereType<String>().where(
+                  (id) => schema.steps.any((step) => step.id == id),
+                )
+              : const <String>[],
+        );
       _markChanged();
     });
   }
@@ -821,6 +940,7 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      _completedStepIds.clear();
       if (_formErrors.isNotEmpty) {
         _formErrors.clear();
         _markChanged();
@@ -839,6 +959,7 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      _completedStepIds.clear();
       if (_formErrors.isNotEmpty) {
         _formErrors.clear();
         _markChanged();
@@ -859,6 +980,7 @@ final class SkyloomFormController extends ChangeNotifier {
         _submitted = false;
         _markChanged();
       }
+      _completedStepIds.clear();
       if (_formErrors.isNotEmpty) {
         _formErrors.clear();
         _markChanged();
@@ -889,6 +1011,7 @@ final class SkyloomFormController extends ChangeNotifier {
     try {
       await onSubmit?.call(values);
       if (invalid) return false;
+      _completedStepIds.addAll(visibleSteps.map((step) => step.id));
       _submitted = true;
       return true;
     } finally {
@@ -1087,6 +1210,13 @@ final class SkyloomFormController extends ChangeNotifier {
         }
       }
       if (changedValueKeys.contains(key)) {
+        final root = key.split('.').first.split('[').first;
+        for (final step in schema.steps) {
+          if (step.fields.contains(root)) {
+            _completedStepIds.remove(step.id);
+            break;
+          }
+        }
         _asyncValidationTimers.remove(key)?.cancel();
         _asyncValidationGenerations[key] =
             (_asyncValidationGenerations[key] ?? 0) + 1;
@@ -1312,6 +1442,51 @@ final class SkyloomFormController extends ChangeNotifier {
     _visibleSteps = List<StepSchema>.unmodifiable(
       indexed.map((entry) => entry.$2),
     );
+  }
+
+  Future<bool> _transitionTo(
+    StepSchema destination, {
+    required SkyloomStepDirection direction,
+    String? completedStepId,
+  }) async {
+    final origin = currentStep;
+    if (origin == null || _navigatingSteps) return false;
+    _navigatingSteps = true;
+    _markChanged();
+    try {
+      final guard = onStepChanging;
+      if (guard != null) {
+        final allowed = await guard(
+          SkyloomStepChange(
+            from: origin,
+            to: destination,
+            direction: direction,
+          ),
+        );
+        if (!allowed) return false;
+      }
+      if (completedStepId != null) {
+        _completedStepIds.add(completedStepId);
+      }
+      _currentStepId = destination.id;
+      return true;
+    } finally {
+      _navigatingSteps = false;
+      _markChanged();
+    }
+  }
+
+  void _requestFieldNavigation(
+    String fieldPath,
+    SkyloomFieldNavigationIntent intent,
+  ) {
+    field(fieldPath);
+    _fieldNavigationRequest = SkyloomFieldNavigationRequest(
+      id: ++_navigationRequestId,
+      fieldPath: fieldPath,
+      intent: intent,
+    );
+    _markChanged();
   }
 
   void _reconcileCurrentStep({bool forceFirst = false}) {

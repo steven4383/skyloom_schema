@@ -1,0 +1,59 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 720 240"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Skyloom woven-thread logo</title>
+  <desc id="description">
+    Two horizontal green threads weave over and under each other.
+  </desc>
+
+  <defs>
+    <clipPath id="dark-thread-overlap">
+      <ellipse cx="462" cy="120" rx="45" ry="38" />
+    </clipPath>
+  </defs>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      stroke="#0B3D2E"
+      stroke-width="46"
+    />
+    <path
+      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      stroke="#FFFFFF"
+      stroke-opacity="0.12"
+      stroke-width="2"
+    />
+    <path
+      d="M52 75h112c75 0 99 90 190 90s115-90 202-90h112"
+      stroke="#32D583"
+      stroke-width="46"
+    />
+    <path
+      d="M52 75h112c75 0 99 90 190 90s115-90 202-90h112"
+      stroke="#FFFFFF"
+      stroke-opacity="0.16"
+      stroke-width="2"
+    />
+
+    <!-- The dark thread passes over at the second crossing. -->
+    <path
+      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      clip-path="url(#dark-thread-overlap)"
+      stroke="#0B3D2E"
+      stroke-width="46"
+    />
+
+    <!-- Fine lines suggest spun thread while keeping the mark flat and scalable. -->
+    <path
+      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      clip-path="url(#dark-thread-overlap)"
+      stroke="#FFFFFF"
+      stroke-opacity="0.12"
+      stroke-width="2"
+    />
+  </g>
+</svg>

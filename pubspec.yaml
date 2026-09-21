@@ -1,6 +1,18 @@
 name: skyloom_schema
 description: A headless-first, schema-driven form engine for Flutter.
-version: 0.9.2
+version: 0.10.0-dev.1
+repository: https://github.com/steven4383/skyloom_schema
+issue_tracker: https://github.com/steven4383/skyloom_schema/issues
+
+topics:
+  - forms
+  - schema
+  - validation
+  - material-design
+
+screenshots:
+  - description: Skyloom package logo
+    path: assets/branding/skyloom-logo-horizontal-green.png
 
 environment:
   sdk: ^3.12.0

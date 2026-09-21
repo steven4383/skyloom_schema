@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/branding/skyloom-logo-horizontal-green.svg" width="220" alt="Skyloom horizontal woven-thread logo">
+</p>
+
 # skyloom_schema
 
 `skyloom_schema` is a headless-first, schema-driven Flutter form engine.
@@ -8,7 +12,7 @@ while keeping rendering replaceable.
 
 ## Project status
 
-The package is currently at version `0.9.2`.
+The package is currently at version `0.10.0-dev.1`.
 
 Available now:
 
@@ -49,6 +53,9 @@ Available now:
 - Automatic invalid-field navigation across steps and collapsed sections
 - Lazy top-level rendering and isolated field repaints for large forms
 - Accessible step progress and live validation announcements
+- Controller-driven reveal/focus navigation across steps and sections
+- Structured backend error mapping with unknown-field policies
+- Guarded step transitions and completed-step tracking
 
 The remaining work before `1.0.0` is API stabilization, broader platform
 verification, benchmarks, and final migration documentation.
@@ -202,11 +209,11 @@ try {
 ```
 
 The full foundation contract is documented in the
-[schema 1.0 specification](docs/schema-v1.md).
+[schema 1.0 specification](doc/schema-v1.md).
 
 ## Complete schema and values example
 
-The following example uses APIs available in `0.9.2`. It defines a form,
+The following example uses APIs available in `0.10.0-dev.1`. It defines a form,
 parses it, creates nested values, and produces JSON-compatible output.
 
 Validation definitions are parsed with the schema and executed when the schema
@@ -481,7 +488,7 @@ controller.submit();
 controller.validateCurrentStep();
 await controller.validateCurrentStepAsync();
 await controller.nextStep();
-controller.previousStep();
+await controller.previousStep();
 await controller.goToStep('contact');
 final savedState = controller.saveState();
 controller.restoreState(savedState);
@@ -827,6 +834,47 @@ controller.clearError('email');
 controller.clearFormErrors();
 controller.clearErrors(); // Clears both kinds.
 ```
+
+Apply a complete backend response in one batched update. Multiple messages for
+one field are retained in the displayed field error, and unknown backend keys
+can become form errors, be ignored, or throw:
+
+```dart
+final result = controller.applyErrors(
+  fieldErrors: {
+    'email': ['Already registered.', 'Use another address.'],
+  },
+  formErrors: ['Unable to save the employee.'],
+  unknownFieldPolicy: SkyloomUnknownFieldErrorPolicy.formError,
+);
+```
+
+### Field navigation and guarded steps
+
+Navigation requests remain controller-driven and renderer-independent. The
+default Material form changes steps, expands collapsed sections, scrolls, and
+focuses when appropriate:
+
+```dart
+controller.revealField('address.city');
+controller.focusField('email');
+```
+
+Applications can guard asynchronous step transitions and optionally enable
+direct navigation from the Material progress chips:
+
+```dart
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  allowStepNavigation: true,
+  onStepChanging: (change) async {
+    return canLeaveStep(change.from.id);
+  },
+);
+```
+
+The controller exposes `navigatingSteps`, `completedStepIds`,
+`isStepComplete`, and `stepErrorCount` for custom workflow interfaces.
 
 ### Radio direction and chips
 
