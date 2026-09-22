@@ -1,59 +1,65 @@
 <svg
   xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 720 240"
+  viewBox="0 0 720 260"
   role="img"
   aria-labelledby="title description"
 >
   <title id="title">Skyloom woven-thread logo</title>
   <desc id="description">
-    Two horizontal green threads weave over and under each other.
+    Four horizontal green threads weave together into a flowing textile mark.
   </desc>
 
-  <defs>
-    <clipPath id="dark-thread-overlap">
-      <ellipse cx="462" cy="120" rx="45" ry="38" />
-    </clipPath>
-  </defs>
-
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Outer dark thread. -->
     <path
-      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      d="M48 190h100c80 0 105-120 205-120s125 120 215 120h104"
       stroke="#0B3D2E"
-      stroke-width="46"
+      stroke-width="26"
     />
     <path
-      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
+      d="M48 190h100c80 0 105-120 205-120s125 120 215 120h104"
       stroke="#FFFFFF"
-      stroke-opacity="0.12"
-      stroke-width="2"
+      stroke-opacity="0.11"
+      stroke-width="1.5"
     />
+
+    <!-- Outer bright thread. -->
     <path
-      d="M52 75h112c75 0 99 90 190 90s115-90 202-90h112"
+      d="M48 70h100c80 0 105 120 205 120s125-120 215-120h104"
       stroke="#32D583"
-      stroke-width="46"
+      stroke-width="26"
     />
     <path
-      d="M52 75h112c75 0 99 90 190 90s115-90 202-90h112"
+      d="M48 70h100c80 0 105 120 205 120s125-120 215-120h104"
       stroke="#FFFFFF"
       stroke-opacity="0.16"
-      stroke-width="2"
+      stroke-width="1.5"
     />
 
-    <!-- The dark thread passes over at the second crossing. -->
+    <!-- Inner dark-green thread. -->
     <path
-      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
-      clip-path="url(#dark-thread-overlap)"
-      stroke="#0B3D2E"
-      stroke-width="46"
+      d="M48 150h126c76 0 99-40 179-40s109 40 191 40h128"
+      stroke="#146B4A"
+      stroke-width="22"
     />
-
-    <!-- Fine lines suggest spun thread while keeping the mark flat and scalable. -->
     <path
-      d="M52 165h112c75 0 99-90 190-90s115 90 202 90h112"
-      clip-path="url(#dark-thread-overlap)"
+      d="M48 150h126c76 0 99-40 179-40s109 40 191 40h128"
       stroke="#FFFFFF"
       stroke-opacity="0.12"
-      stroke-width="2"
+      stroke-width="1.5"
+    />
+
+    <!-- Inner light-green thread completes the weave. -->
+    <path
+      d="M48 110h126c76 0 99 40 179 40s109-40 191-40h128"
+      stroke="#65E6AB"
+      stroke-width="22"
+    />
+    <path
+      d="M48 110h126c76 0 99 40 179 40s109-40 191-40h128"
+      stroke="#FFFFFF"
+      stroke-opacity="0.18"
+      stroke-width="1.5"
     />
   </g>
 </svg>

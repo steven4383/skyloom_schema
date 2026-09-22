@@ -123,6 +123,31 @@ void main() {
     );
   });
 
+  test('supports inclusive static date bounds', () {
+    final date = field({
+      ValidationRule.minDate: '2026-09-10',
+      ValidationRule.maxDate: {
+        'value': '2026-09-20',
+        'message': 'Choose a date during enrollment.',
+      },
+    }, type: FormType.date);
+
+    expect(
+      engine.validateField(date, '2026-09-09', values),
+      'Value must be on or after 2026-09-10.',
+    );
+    expect(engine.validateField(date, '2026-09-10', values), isNull);
+    expect(engine.validateField(date, '2026-09-20', values), isNull);
+    expect(
+      engine.validateField(date, '2026-09-21', values),
+      'Choose a date during enrollment.',
+    );
+    expect(
+      engine.validateField(date, 'not-a-date', values),
+      'Value must be a valid date.',
+    );
+  });
+
   test('enforces array item-count bounds including empty arrays', () {
     final schema = const SchemaParser()
         .parse({

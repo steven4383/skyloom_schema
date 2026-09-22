@@ -16,6 +16,7 @@ final class SkyloomRendererContext {
     required this.formController,
     required this.buildChild,
     required this.validateOnChange,
+    this.revalidateInvalidOnChange = false,
     required this.validateOnBlur,
   });
 
@@ -25,14 +26,21 @@ final class SkyloomRendererContext {
   final SkyloomFormController formController;
   final SkyloomChildFieldBuilder buildChild;
   final bool validateOnChange;
+
+  /// Revalidates a field on edit only after it already has an error.
+  ///
+  /// This lets submit- and blur-mode forms remove stale errors without making
+  /// every untouched field validate on each change.
+  final bool revalidateInvalidOnChange;
   final bool validateOnBlur;
 
   Object? get value => fieldController.value;
   String? get error => fieldController.error;
 
   void setValue(Object? value) {
+    final hadError = fieldController.error != null;
     formController.setValue(fieldPath, value);
-    if (validateOnChange) {
+    if (validateOnChange || (revalidateInvalidOnChange && hadError)) {
       formController.validateField(fieldPath);
       formController.scheduleAsyncValidation(fieldPath);
     }

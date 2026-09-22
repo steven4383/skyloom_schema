@@ -513,7 +513,9 @@ SkyloomForm.fromJson(
 ```
 
 Available modes are `onChange`, `onBlur`, `onSubmit`, and `manual`. Manual mode
-leaves validation entirely under controller control.
+leaves validation entirely under controller control. In `onBlur` and
+`onSubmit` modes, a field that already displays an error is revalidated as the
+user corrects it, so field and summary errors do not remain stale.
 
 ### Custom validators
 
@@ -570,17 +572,27 @@ strings, ISO dates, and nested paths:
 
 ```dart
 {
+  'key': 'startDate',
+  'type': FormType.date,
+},
+{
   'key': 'endDate',
   'type': FormType.date,
+  'dependsOn': ['startDate'],
   'validation': {
     ValidationRule.greaterThan: 'startDate',
+    ValidationRule.maxDate: '2027-12-31',
   },
 }
 ```
 
 Available rules are `sameAs`, `notSameAs`, `greaterThan`,
 `greaterThanOrEqual`, `lessThan`, and `lessThanOrEqual`. Custom validators can
-read the complete value tree from `context.values`.
+read the complete value tree from `context.values`. Date fields also support
+inclusive ISO `minDate` and `maxDate` rules. The Material date picker combines
+those static limits with date comparison rules, disabling dates outside the
+valid range. Declare the referenced field in `dependsOn` to revalidate an
+existing end date when its start date changes.
 
 ### Nested object fields
 

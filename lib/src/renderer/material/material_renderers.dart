@@ -6,6 +6,7 @@ import '../../registry/renderer_registry.dart';
 import '../../schema/field_schema.dart';
 import '../../schema/form_type.dart';
 import '../../schema/ui_schema.dart';
+import '../../schema/validation_rule.dart';
 import '../../utils/json_value_utils.dart';
 import '../../utils/path_utils.dart';
 import '../field_renderer.dart';
@@ -1144,9 +1145,79 @@ final class _SkyloomDateField extends StatelessWidget {
   final SkyloomRendererContext rendererContext;
 
   DateTime? _parseDate(Object? value) {
-    if (value is DateTime) return value;
-    if (value is String) return DateTime.tryParse(value);
-    return null;
+    final parsed = switch (value) {
+      DateTime date => date,
+      String text => DateTime.tryParse(text),
+      _ => null,
+    };
+    return parsed == null
+        ? null
+        : DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
+  Object? _ruleValue(Object? rule) {
+    return rule is Map<String, Object?> ? rule['value'] : rule;
+  }
+
+  DateTime? _configuredDate(Map<String, Object?> rules, String ruleName) {
+    return _parseDate(_ruleValue(rules[ruleName]));
+  }
+
+  DateTime? _referencedDate(Map<String, Object?> rules, String ruleName) {
+    final path = _ruleValue(rules[ruleName]);
+    if (path is! String || path.isEmpty) return null;
+    try {
+      return _parseDate(rendererContext.formController.value(path));
+    } on ArgumentError {
+      return null;
+    }
+  }
+
+  DateTime _laterDate(DateTime current, DateTime candidate) {
+    return candidate.isAfter(current) ? candidate : current;
+  }
+
+  DateTime _earlierDate(DateTime current, DateTime candidate) {
+    return candidate.isBefore(current) ? candidate : current;
+  }
+
+  ({DateTime first, DateTime last}) _dateBounds() {
+    final rules =
+        rendererContext.fieldSchema.validation?.rules ??
+        const <String, Object?>{};
+    var first = DateTime(1900);
+    var last = DateTime(2100);
+
+    final minDate = _configuredDate(rules, ValidationRule.minDate);
+    if (minDate != null) first = _laterDate(first, minDate);
+    final maxDate = _configuredDate(rules, ValidationRule.maxDate);
+    if (maxDate != null) last = _earlierDate(last, maxDate);
+
+    final greaterThan = _referencedDate(rules, ValidationRule.greaterThan);
+    if (greaterThan != null) {
+      first = _laterDate(first, greaterThan.add(const Duration(days: 1)));
+    }
+    final greaterThanOrEqual = _referencedDate(
+      rules,
+      ValidationRule.greaterThanOrEqual,
+    );
+    if (greaterThanOrEqual != null) {
+      first = _laterDate(first, greaterThanOrEqual);
+    }
+
+    final lessThan = _referencedDate(rules, ValidationRule.lessThan);
+    if (lessThan != null) {
+      last = _earlierDate(last, lessThan.subtract(const Duration(days: 1)));
+    }
+    final lessThanOrEqual = _referencedDate(
+      rules,
+      ValidationRule.lessThanOrEqual,
+    );
+    if (lessThanOrEqual != null) {
+      last = _earlierDate(last, lessThanOrEqual);
+    }
+
+    return (first: first, last: last);
   }
 
   @override
@@ -1171,12 +1242,26 @@ final class _SkyloomDateField extends StatelessWidget {
       onTap: field.readOnly
           ? null
           : () async {
+              final bounds = _dateBounds();
+              if (bounds.first.isAfter(bounds.last)) {
+                rendererContext.formController.setError(
+                  rendererContext.fieldPath,
+                  'No selectable dates are available.',
+                );
+                return;
+              }
               final now = DateTime.now();
+              var initialDate = selectedDate ?? now;
+              if (initialDate.isBefore(bounds.first)) {
+                initialDate = bounds.first;
+              } else if (initialDate.isAfter(bounds.last)) {
+                initialDate = bounds.last;
+              }
               final picked = await showDatePicker(
                 context: context,
-                initialDate: selectedDate ?? now,
-                firstDate: DateTime(1900),
-                lastDate: DateTime(2100),
+                initialDate: initialDate,
+                firstDate: bounds.first,
+                lastDate: bounds.last,
               );
               if (picked != null) {
                 rendererContext.setValue(

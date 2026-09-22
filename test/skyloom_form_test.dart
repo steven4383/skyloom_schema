@@ -69,8 +69,88 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
     await tester.pump();
 
-    expect(find.text('Email is required.'), findsOneWidget);
+    expect(find.text('Email is required.'), findsWidgets);
     expect(submitted, isFalse);
+  });
+
+  testWidgets('clears an existing submit-mode checkbox error when corrected', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'confirmation',
+              'fields': [
+                {
+                  'key': 'confirmed',
+                  'type': FormType.checkbox,
+                  'label': 'I confirm the information is correct',
+                  'validation': {'required': true},
+                },
+              ],
+            },
+            validationMode: SkyloomValidationMode.onSubmit,
+            onSubmit: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.pump();
+    expect(
+      find.textContaining('I confirm the information is correct is required.'),
+      findsWidgets,
+    );
+
+    await tester.tap(find.text('I confirm the information is correct'));
+    await tester.pump();
+    expect(
+      find.textContaining('I confirm the information is correct is required.'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('constrains a date calendar using static and field bounds', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'date_range',
+              'fields': [
+                {'key': 'from', 'type': FormType.date, 'label': 'From'},
+                {
+                  'key': 'to',
+                  'type': FormType.date,
+                  'label': 'To',
+                  'dependsOn': ['from'],
+                  'validation': {
+                    'greaterThan': 'from',
+                    'maxDate': '2026-09-30',
+                  },
+                },
+              ],
+            },
+            initialValues: const {'from': '2026-09-17'},
+            showSubmitButton: false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(TextFormField).at(1));
+    await tester.pumpAndSettle();
+
+    final picker = tester.widget<CalendarDatePicker>(
+      find.byType(CalendarDatePicker),
+    );
+    expect(picker.firstDate, DateTime(2026, 9, 18));
+    expect(picker.lastDate, DateTime(2026, 9, 30));
   });
 
   testWidgets('calls onChanged when a field value changes', (tester) async {
@@ -487,11 +567,9 @@ void main() {
 
     expect(submitted, isFalse);
     expect(find.text('1 error'), findsOneWidget);
-    expect(find.text('Email is required.'), findsOneWidget);
+    expect(find.text('Email is required.'), findsWidgets);
 
-    await tester.tap(
-      find.widgetWithText(TextButton, 'Email: Email is required.'),
-    );
+    await tester.tap(find.widgetWithText(TextButton, 'Email is required.'));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsOneWidget);
   });

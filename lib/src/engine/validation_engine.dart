@@ -86,6 +86,27 @@ final class ValidationEngine {
           '$label must be at most $max.';
     }
 
+    if (field.type == FormType.date) {
+      final dateValue = _dateValue(value);
+      if (dateValue == null) return '$label must be a valid date.';
+
+      final minDateRule = rules[ValidationRule.minDate];
+      final minDateText = _stringValue(minDateRule);
+      final minDate = _dateValue(minDateText);
+      if (minDate != null && dateValue.isBefore(minDate)) {
+        return _message(minDateRule) ??
+            '$label must be on or after ${_formatDate(minDate)}.';
+      }
+
+      final maxDateRule = rules[ValidationRule.maxDate];
+      final maxDateText = _stringValue(maxDateRule);
+      final maxDate = _dateValue(maxDateText);
+      if (maxDate != null && dateValue.isAfter(maxDate)) {
+        return _message(maxDateRule) ??
+            '$label must be on or before ${_formatDate(maxDate)}.';
+      }
+    }
+
     final emailRule = rules[ValidationRule.email];
     final shouldValidateEmail =
         field.type == FormType.email || _enabled(emailRule);
@@ -221,6 +242,22 @@ final class ValidationEngine {
     }
     return null;
   }
+
+  DateTime? _dateValue(Object? value) {
+    final parsed = switch (value) {
+      DateTime date => date,
+      String text => DateTime.tryParse(text),
+      _ => null,
+    };
+    return parsed == null
+        ? null
+        : DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
+  String _formatDate(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
 
   bool _deepEquals(Object? left, Object? right) {
     if (identical(left, right)) return true;

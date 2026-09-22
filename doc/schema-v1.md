@@ -48,6 +48,32 @@ Common optional properties are:
 The parser preserves unknown properties in `additionalProperties`. This lets a
 consumer safely parse properties introduced by later releases.
 
+## Validation
+
+The built-in validation engine supports required, string length, numeric
+bounds, email, URL, regular-expression, equality, and comparison rules. A rule
+may be a direct value or an object containing `value` and a custom `message`.
+
+Date fields use ISO 8601 date strings. `minDate` and `maxDate` are inclusive
+static bounds. `greaterThan`, `greaterThanOrEqual`, `lessThan`, and
+`lessThanOrEqual` may reference another date field. The Material date picker
+uses both kinds of rules to restrict selectable dates.
+
+```json
+{
+  "key": "endDate",
+  "type": "date",
+  "dependsOn": ["startDate"],
+  "validation": {
+    "greaterThanOrEqual": "startDate",
+    "maxDate": "2027-12-31"
+  }
+}
+```
+
+Declare comparison sources in `dependsOn` when the target should revalidate
+immediately after a source value changes.
+
 ## Object and array fields
 
 Object fields recursively contain `fields` and serialize as nested JSON

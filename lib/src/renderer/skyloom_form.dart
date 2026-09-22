@@ -349,6 +349,8 @@ final class _SkyloomFormState extends State<SkyloomForm> {
                   formController: _controller,
                   buildChild: _buildField,
                   validateOnChange: widget.validateOnChange,
+                  revalidateInvalidOnChange:
+                      widget.validationMode != SkyloomValidationMode.manual,
                   validateOnBlur: widget.validateOnBlur,
                 ),
               ),

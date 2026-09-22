@@ -5,6 +5,8 @@ abstract final class ValidationRule {
   static const String maxLength = 'maxLength';
   static const String min = 'min';
   static const String max = 'max';
+  static const String minDate = 'minDate';
+  static const String maxDate = 'maxDate';
   static const String email = 'email';
   static const String pattern = 'pattern';
   static const String regex = 'regex';

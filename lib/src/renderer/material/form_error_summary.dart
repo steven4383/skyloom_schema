@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../controller/form_error.dart';
 import '../../controller/form_controller.dart';
 
 typedef SkyloomFieldLabelResolver = String Function(String fieldPath);
@@ -74,9 +75,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
                             ),
                             onPressed: () => onReveal(error.fieldKey!),
                             icon: const Icon(Icons.arrow_forward, size: 16),
-                            label: Text(
-                              '${fieldLabel(error.fieldKey!)}: ${error.message}',
-                            ),
+                            label: Text(_fieldErrorText(error)),
                           ),
                         ),
                   ],
@@ -87,5 +86,14 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _fieldErrorText(SkyloomErrorEntry error) {
+    final label = fieldLabel(error.fieldKey!);
+    final message = error.message.trim();
+    if (message.toLowerCase().startsWith(label.trim().toLowerCase())) {
+      return message;
+    }
+    return '$label: $message';
   }
 }

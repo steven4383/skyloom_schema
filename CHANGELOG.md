@@ -9,7 +9,13 @@
 - Add asynchronous step-transition guards, navigation loading state,
   completed-step tracking, step error counts, and optional progress-chip
   navigation.
-- Add the horizontal green woven-thread Skyloom logo as an editable SVG vector, with a PNG package preview.
+- Add the horizontal four-thread green Skyloom logo as an editable SVG vector.
+- Revalidate displayed field errors as users correct values in blur and submit
+  validation modes while preserving fully manual validation.
+- Avoid repeating a field label when its validation-summary message already
+  includes that label.
+- Add inclusive `minDate` and `maxDate` rules and constrain Material date
+  calendars using static and cross-field comparison bounds.
 
 ## 0.9.2
 
