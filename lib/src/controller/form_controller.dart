@@ -6,7 +6,9 @@ import 'package:flutter/foundation.dart';
 import '../engine/condition_engine.dart';
 import '../engine/data_source.dart';
 import '../engine/async_validation.dart';
+import '../engine/file_upload.dart';
 import '../engine/validation_engine.dart';
+import '../engine/validation_error.dart';
 import '../schema/dependency_schema.dart';
 import '../schema/field_schema.dart';
 import '../schema/field_option.dart';
@@ -91,12 +93,16 @@ final class SkyloomFormController extends ChangeNotifier {
     Map<String, SkyloomValidator> validators = const {},
     Map<String, SkyloomDataSource> dataSources = const {},
     Map<String, SkyloomAsyncValidator> asyncValidators = const {},
+    Map<String, SkyloomFileUploadHandler> fileUploadHandlers = const {},
     this.onDependencyChanged,
     this.onStepChanging,
   }) : _validators = Map<String, SkyloomValidator>.unmodifiable(validators),
        _dataSources = Map<String, SkyloomDataSource>.unmodifiable(dataSources),
        _asyncValidators = Map<String, SkyloomAsyncValidator>.unmodifiable(
          asyncValidators,
+       ),
+       _fileUploadHandlers = Map<String, SkyloomFileUploadHandler>.unmodifiable(
+         fileUploadHandlers,
        ) {
     _buildDefaultValues(schema.fields);
     _registerFields(schema.fields, initialValues);
@@ -115,6 +121,7 @@ final class SkyloomFormController extends ChangeNotifier {
   Map<String, SkyloomValidator> _validators;
   Map<String, SkyloomDataSource> _dataSources;
   Map<String, SkyloomAsyncValidator> _asyncValidators;
+  Map<String, SkyloomFileUploadHandler> _fileUploadHandlers;
   final Map<String, SkyloomFieldController> _fields = {};
   final Map<String, VoidCallback> _fieldListeners = {};
   final Map<String, List<String>> _dependents = {};
@@ -146,6 +153,8 @@ final class SkyloomFormController extends ChangeNotifier {
   Map<String, SkyloomValidator> get validators => _validators;
   Map<String, SkyloomDataSource> get dataSources => _dataSources;
   Map<String, SkyloomAsyncValidator> get asyncValidators => _asyncValidators;
+  Map<String, SkyloomFileUploadHandler> get fileUploadHandlers =>
+      _fileUploadHandlers;
   Map<String, SkyloomDataSourceState> get dataSourceStates =>
       Map<String, SkyloomDataSourceState>.unmodifiable(_dataSourceStates);
   Map<String, SkyloomAsyncValidationStatus> get asyncValidationStates =>
@@ -225,8 +234,14 @@ final class SkyloomFormController extends ChangeNotifier {
 
   List<SkyloomErrorEntry> get errorEntries => <SkyloomErrorEntry>[
     for (final message in _formErrors) SkyloomErrorEntry(message: message),
-    for (final entry in errors.entries)
-      SkyloomErrorEntry(fieldKey: entry.key, message: entry.value),
+    for (final target in _fields.values)
+      if (target.validationError != null && _isFieldInVisibleStep(target.key))
+        SkyloomErrorEntry(
+          fieldKey: target.key,
+          message: target.validationError!.message,
+          code: target.validationError!.code,
+          arguments: target.validationError!.arguments,
+        ),
   ];
 
   String? get firstErrorFieldKey {
@@ -346,20 +361,32 @@ final class SkyloomFormController extends ChangeNotifier {
     }
 
     final actualValue = value(key);
-    var error = validationEngine.validateField(
+    var validationError = validationEngine.validateFieldError(
       target.schema,
       actualValue,
       values,
       requiredOverride: target.required,
     );
-    if (error == null && target.schema.type == FormType.array) {
-      error = _validateArrayItems(target.schema, actualValue, key);
+    if (validationError == null && target.schema.type == FormType.array) {
+      final message = _validateArrayItems(target.schema, actualValue, key);
+      if (message != null) {
+        validationError = SkyloomValidationError(
+          code: SkyloomValidationCode.custom,
+          message: message,
+        );
+      }
     }
-    final customError = error == null
+    final customError = validationError == null
         ? _runCustomValidators(target, actualValue)
         : null;
-    target.setError(error ?? customError);
-    return error == null && customError == null;
+    if (validationError == null && customError != null) {
+      validationError = SkyloomValidationError(
+        code: SkyloomValidationCode.custom,
+        message: customError,
+      );
+    }
+    target.setValidationError(validationError);
+    return validationError == null;
   }
 
   bool validate() {
@@ -449,7 +476,10 @@ final class SkyloomFormController extends ChangeNotifier {
         if (messages.isEmpty) continue;
         final target = _fields[entry.key];
         if (target != null) {
-          target.setError(messages.join('\n'));
+          target.setError(
+            messages.join('\n'),
+            code: SkyloomValidationCode.server,
+          );
           applied.add(entry.key);
           continue;
         }
@@ -526,6 +556,14 @@ final class SkyloomFormController extends ChangeNotifier {
   void setAsyncValidators(Map<String, SkyloomAsyncValidator> asyncValidators) {
     _asyncValidators = Map<String, SkyloomAsyncValidator>.unmodifiable(
       asyncValidators,
+    );
+  }
+
+  void setFileUploadHandlers(
+    Map<String, SkyloomFileUploadHandler> fileUploadHandlers,
+  ) {
+    _fileUploadHandlers = Map<String, SkyloomFileUploadHandler>.unmodifiable(
+      fileUploadHandlers,
     );
   }
 
@@ -702,6 +740,7 @@ final class SkyloomFormController extends ChangeNotifier {
     if (validator == null) {
       target.setError(
         'No async validator is registered for "${config.handler}".',
+        code: SkyloomValidationCode.async,
       );
       _asyncValidationStates[key] = SkyloomAsyncValidationStatus.failure;
       _markChanged();
@@ -716,7 +755,7 @@ final class SkyloomFormController extends ChangeNotifier {
     });
     if (config.cache && _asyncValidationCache.containsKey(cacheKey)) {
       final error = _asyncValidationCache[cacheKey];
-      target.setError(error);
+      target.setError(error, code: SkyloomValidationCode.async);
       _asyncValidationStates[key] = error == null
           ? SkyloomAsyncValidationStatus.success
           : SkyloomAsyncValidationStatus.failure;
@@ -742,7 +781,7 @@ final class SkyloomFormController extends ChangeNotifier {
       if (_asyncValidationGenerations[key] != generation) return false;
       if (config.cache) _asyncValidationCache[cacheKey] = error;
       target
-        ..setError(error)
+        ..setError(error, code: SkyloomValidationCode.async)
         ..setLoading(false);
       _asyncValidationStates[key] = error == null
           ? SkyloomAsyncValidationStatus.success
@@ -752,7 +791,7 @@ final class SkyloomFormController extends ChangeNotifier {
     } catch (error) {
       if (_asyncValidationGenerations[key] != generation) return false;
       target
-        ..setError(error.toString())
+        ..setError(error.toString(), code: SkyloomValidationCode.async)
         ..setLoading(false);
       _asyncValidationStates[key] = SkyloomAsyncValidationStatus.failure;
       _markChanged();

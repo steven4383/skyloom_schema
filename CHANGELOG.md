@@ -16,6 +16,18 @@
   includes that label.
 - Add inclusive `minDate` and `maxDate` rules and constrain Material date
   calendars using static and cross-field comparison bounds.
+- Add stable validation error codes while preserving the existing string error
+  API, including distinct custom, async, server, and upload failures.
+- Add `SkyloomMessages` with default English validation copy and per-form or
+  per-controller localization support.
+- Add accumulating schema diagnostics, unknown-field-type policies, and
+  defensive field, nesting, array, option, and condition limits.
+- Add provider-neutral single and multiple file fields with registered upload
+  callbacks, JSON-safe uploaded-file references, and count/size/type checks.
+- Complete the non-breaking pre-1.0 public API audit and document its stability
+  decisions.
+- Fix Feature Guide expansion by isolating code-block page storage, and prevent
+  documentation badges from overflowing on narrow screens.
 
 ## 0.9.2
 

@@ -71,6 +71,165 @@ void main() {
       expect(field.metadata['analyticsId'], 'role');
     });
 
+    test('parses and round trips file-upload configuration', () {
+      final schema = parser.parse({
+        'id': 'documents',
+        'fields': [
+          {
+            'key': 'attachments',
+            'type': FormType.file,
+            'upload': {
+              'handler': 'documentUpload',
+              'multiple': true,
+              'accept': ['application/pdf', 'image/*'],
+              'maxBytes': 5000000,
+              'maxFiles': 3,
+            },
+          },
+        ],
+      });
+
+      final upload = schema.fields.single.fileUpload!;
+      expect(upload.handler, 'documentUpload');
+      expect(upload.multiple, isTrue);
+      expect(upload.accept, ['application/pdf', 'image/*']);
+      expect(upload.maxBytes, 5000000);
+      expect(upload.maxFiles, 3);
+      expect(parser.parse(schema.toJson()).toJson(), schema.toJson());
+    });
+
+    test('collects multiple diagnostics without throwing', () {
+      final result = parser.validate({
+        'id': '',
+        'fields': [
+          {'key': '', 'type': ''},
+          {'type': FormType.text},
+        ],
+      });
+
+      expect(result.isValid, isFalse);
+      expect(result.schema, isNull);
+      expect(result.errors.length, greaterThanOrEqualTo(3));
+      expect(result.errors.map((error) => error.path), contains(r'$.id'));
+      expect(
+        result.errors.map((error) => error.path),
+        contains(r'$.fields[0].key'),
+      );
+      expect(
+        result.errors.map((error) => error.path),
+        contains(r'$.fields[1].key'),
+      );
+    });
+
+    test('collects independent nested, option, and upload diagnostics', () {
+      final result = parser.validate({
+        'id': 'diagnostics',
+        'fields': [
+          {
+            'key': 'profile',
+            'type': FormType.object,
+            'fields': [
+              {'key': 'name', 'type': FormType.text},
+              {
+                'key': 'name',
+                'type': FormType.select,
+                'options': [{}],
+              },
+            ],
+          },
+          {
+            'key': 'resume',
+            'type': FormType.file,
+            'upload': {
+              'handler': '',
+              'accept': [''],
+              'maxBytes': 0,
+            },
+          },
+          {'key': 'items', 'type': FormType.array},
+        ],
+      });
+
+      final codes = result.errors.map((error) => error.code).toSet();
+      expect(codes, contains('schema.duplicateField'));
+      expect(codes, contains('schema.requiredProperty'));
+      expect(codes, contains('schema.emptyUploadAccept'));
+      expect(codes, contains('schema.expectedPositiveInteger'));
+      expect(codes, contains('schema.requiredItems'));
+      expect(result.errors.length, greaterThanOrEqualTo(6));
+    });
+
+    test('reports unknown types according to policy', () {
+      const warningParser = SchemaParser(
+        unknownFieldTypePolicy: SchemaUnknownFieldTypePolicy.warning,
+      );
+      final warning = warningParser.validate({
+        'id': 'custom',
+        'fields': [
+          {'key': 'location', 'type': 'geoPicker'},
+        ],
+      });
+      expect(warning.isValid, isTrue);
+      expect(warning.warnings.single.code, 'schema.unknownFieldType');
+
+      const strictParser = SchemaParser(
+        unknownFieldTypePolicy: SchemaUnknownFieldTypePolicy.error,
+      );
+      expect(
+        () => strictParser.parse({
+          'id': 'custom',
+          'fields': [
+            {'key': 'location', 'type': 'geoPicker'},
+          ],
+        }),
+        throwsA(isA<SchemaParseException>()),
+      );
+    });
+
+    test('enforces schema and condition complexity limits', () {
+      const limited = SchemaParser(
+        limits: SchemaLimits(
+          maxFields: 1,
+          maxNestingDepth: 2,
+          maxArrayItems: 2,
+          maxOptionsPerField: 1,
+          maxConditionDepth: 2,
+          maxConditionNodes: 1,
+        ),
+      );
+      final result = limited.validate({
+        'id': 'too_large',
+        'fields': [
+          {
+            'key': 'first',
+            'type': FormType.select,
+            'options': [
+              {'label': 'One', 'value': 1},
+              {'label': 'Two', 'value': 2},
+            ],
+            'visibleWhen': {
+              'all': [
+                {'field': 'second', 'equals': true},
+                {'field': 'second', 'notEquals': false},
+              ],
+            },
+          },
+          {
+            'key': 'second',
+            'type': FormType.array,
+            'maxItems': 3,
+            'items': {'type': FormType.text},
+          },
+        ],
+      });
+
+      final codes = result.errors.map((error) => error.code).toSet();
+      expect(codes, contains('limit.fields'));
+      expect(codes, contains('limit.options'));
+      expect(codes, contains('limit.arrayItems'));
+      expect(codes, contains('limit.conditionNodes'));
+    });
+
     test('preserves unknown properties for future extensions', () {
       final schema = parser.parse({
         'id': 'conditional',

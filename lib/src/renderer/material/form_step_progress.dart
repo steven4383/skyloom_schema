@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../controller/form_controller.dart';
+import '../../engine/skyloom_messages.dart';
 
 /// Material progress header for a schema-driven multi-step workflow.
 final class SkyloomMaterialStepProgress extends StatelessWidget {
@@ -11,6 +12,7 @@ final class SkyloomMaterialStepProgress extends StatelessWidget {
     required this.visible,
     required this.allowNavigation,
     required this.bottomSpacing,
+    this.messages = const EnglishSkyloomMessages(),
     super.key,
   });
 
@@ -18,6 +20,7 @@ final class SkyloomMaterialStepProgress extends StatelessWidget {
   final bool visible;
   final bool allowNavigation;
   final double bottomSpacing;
+  final SkyloomMessages messages;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +33,7 @@ final class SkyloomMaterialStepProgress extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final index = controller.currentStepIndex;
-        final label = 'Step ${index + 1} of ${steps.length}';
+        final label = messages.stepProgress(index + 1, steps.length);
         return Semantics(
           container: true,
           label: '$label: ${step.title ?? step.id}',

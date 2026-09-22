@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../controller/form_error.dart';
 import '../../controller/form_controller.dart';
+import '../../engine/skyloom_messages.dart';
 
 typedef SkyloomFieldLabelResolver = String Function(String fieldPath);
 typedef SkyloomRevealErrorCallback = void Function(String fieldPath);
@@ -14,6 +15,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
     required this.bottomSpacing,
     required this.fieldLabel,
     required this.onReveal,
+    this.messages = const EnglishSkyloomMessages(),
     super.key,
   });
 
@@ -22,6 +24,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
   final double bottomSpacing;
   final SkyloomFieldLabelResolver fieldLabel;
   final SkyloomRevealErrorCallback onReveal;
+  final SkyloomMessages messages;
 
   @override
   Widget build(BuildContext context) {
@@ -34,8 +37,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
         return Semantics(
           container: true,
           liveRegion: true,
-          label:
-              '${errors.length} form ${errors.length == 1 ? 'error' : 'errors'}',
+          label: messages.errorCount(errors.length),
           child: Padding(
             padding: EdgeInsets.only(bottom: bottomSpacing),
             child: DecoratedBox(
@@ -49,8 +51,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Please review ${errors.length} '
-                      '${errors.length == 1 ? 'error' : 'errors'}',
+                      messages.reviewErrors(errors.length),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         color: colors.onErrorContainer,
                       ),

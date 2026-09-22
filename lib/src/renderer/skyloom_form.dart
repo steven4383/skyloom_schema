@@ -8,6 +8,9 @@ import '../controller/form_controller.dart';
 import '../controller/field_navigation.dart';
 import '../controller/step_navigation.dart';
 import '../engine/data_source.dart';
+import '../engine/file_upload.dart';
+import '../engine/skyloom_messages.dart';
+import '../engine/validation_engine.dart';
 import '../engine/validation_mode.dart';
 import '../parser/schema_parser.dart';
 import '../registry/renderer_registry.dart';
@@ -46,6 +49,8 @@ final class SkyloomForm extends StatefulWidget {
     this.validators = const {},
     this.dataSources = const {},
     this.asyncValidators = const {},
+    this.fileUploadHandlers = const {},
+    this.messages = const EnglishSkyloomMessages(),
     this.onDependencyChanged,
     this.onStepChanging,
     bool? validateOnChange,
@@ -78,14 +83,16 @@ final class SkyloomForm extends StatefulWidget {
     Map<String, SkyloomValidator> validators = const {},
     Map<String, SkyloomDataSource> dataSources = const {},
     Map<String, SkyloomAsyncValidator> asyncValidators = const {},
+    Map<String, SkyloomFileUploadHandler> fileUploadHandlers = const {},
+    SkyloomMessages messages = const EnglishSkyloomMessages(),
     SkyloomDependencyCallback? onDependencyChanged,
     SkyloomStepGuard? onStepChanging,
     bool? validateOnChange,
     SkyloomValidationMode validationMode = SkyloomValidationMode.onChange,
     bool showSubmitButton = true,
-    String submitButtonLabel = 'Submit',
-    String nextButtonLabel = 'Next',
-    String backButtonLabel = 'Back',
+    String? submitButtonLabel,
+    String? nextButtonLabel,
+    String? backButtonLabel,
     bool showStepProgress = true,
     bool allowStepNavigation = false,
     bool showErrorSummary = true,
@@ -110,14 +117,16 @@ final class SkyloomForm extends StatefulWidget {
       validators: validators,
       dataSources: dataSources,
       asyncValidators: asyncValidators,
+      fileUploadHandlers: fileUploadHandlers,
+      messages: messages,
       onDependencyChanged: onDependencyChanged,
       onStepChanging: onStepChanging,
       validateOnChange: validateOnChange,
       validationMode: validationMode,
       showSubmitButton: showSubmitButton,
-      submitButtonLabel: submitButtonLabel,
-      nextButtonLabel: nextButtonLabel,
-      backButtonLabel: backButtonLabel,
+      submitButtonLabel: submitButtonLabel ?? messages.submit,
+      nextButtonLabel: nextButtonLabel ?? messages.next,
+      backButtonLabel: backButtonLabel ?? messages.back,
       showStepProgress: showStepProgress,
       allowStepNavigation: allowStepNavigation,
       showErrorSummary: showErrorSummary,
@@ -142,6 +151,8 @@ final class SkyloomForm extends StatefulWidget {
   final Map<String, SkyloomValidator> validators;
   final Map<String, SkyloomDataSource> dataSources;
   final Map<String, SkyloomAsyncValidator> asyncValidators;
+  final Map<String, SkyloomFileUploadHandler> fileUploadHandlers;
+  final SkyloomMessages messages;
   final SkyloomDependencyCallback? onDependencyChanged;
   final SkyloomStepGuard? onStepChanging;
   final bool? _validateOnChangeOverride;
@@ -206,6 +217,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (oldWidget.controller != widget.controller ||
         schemaChanged ||
         initialValuesChanged ||
+        oldWidget.messages != widget.messages ||
         oldWidget.onDependencyChanged != widget.onDependencyChanged ||
         oldWidget.onStepChanging != widget.onStepChanging) {
       _detachController();
@@ -219,6 +231,10 @@ final class _SkyloomFormState extends State<SkyloomForm> {
     if (_ownsController &&
         oldWidget.asyncValidators != widget.asyncValidators) {
       _controller.setAsyncValidators(widget.asyncValidators);
+    }
+    if (_ownsController &&
+        oldWidget.fileUploadHandlers != widget.fileUploadHandlers) {
+      _controller.setFileUploadHandlers(widget.fileUploadHandlers);
     }
     if (oldWidget.renderers != widget.renderers) {
       _rendererRegistry = MaterialSkyloomRenderers.defaults(
@@ -234,9 +250,11 @@ final class _SkyloomFormState extends State<SkyloomForm> {
         SkyloomFormController(
           schema: widget.schema,
           initialValues: widget.initialValues,
+          validationEngine: ValidationEngine(messages: widget.messages),
           validators: widget.validators,
           dataSources: widget.dataSources,
           asyncValidators: widget.asyncValidators,
+          fileUploadHandlers: widget.fileUploadHandlers,
           onDependencyChanged: widget.onDependencyChanged,
           onStepChanging: widget.onStepChanging,
         );
@@ -332,6 +350,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
             child: _UnsupportedFieldType(
               fieldKey: fieldPath,
               fieldType: rendererType,
+              messages: widget.messages,
             ),
           );
         }
@@ -347,6 +366,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
                   fieldPath: fieldPath,
                   fieldController: fieldController,
                   formController: _controller,
+                  messages: widget.messages,
                   buildChild: _buildField,
                   validateOnChange: widget.validateOnChange,
                   revalidateInvalidOnChange:
@@ -605,6 +625,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
       visible: widget.showStepProgress,
       allowNavigation: widget.allowStepNavigation,
       bottomSpacing: widget.fieldSpacing,
+      messages: widget.messages,
     );
   }
 
@@ -616,6 +637,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
       fieldLabel: (fieldPath) =>
           _controller.field(fieldPath).schema.label ?? fieldPath,
       onReveal: (fieldPath) => unawaited(_revealError(fieldPath)),
+      messages: widget.messages,
     );
   }
 
@@ -756,16 +778,18 @@ final class _UnsupportedFieldType extends StatelessWidget {
   const _UnsupportedFieldType({
     required this.fieldKey,
     required this.fieldType,
+    required this.messages,
   });
 
   final String fieldKey;
   final String fieldType;
+  final SkyloomMessages messages;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Semantics(
-      label: 'Unsupported field type $fieldType for $fieldKey',
+      label: messages.unsupportedField(fieldType, fieldKey),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.errorContainer,
@@ -774,7 +798,7 @@ final class _UnsupportedFieldType extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Text(
-            'No renderer is registered for "$fieldType" ($fieldKey).',
+            messages.missingRenderer(fieldType, fieldKey),
             style: TextStyle(color: colors.onErrorContainer),
           ),
         ),

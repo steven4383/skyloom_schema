@@ -44,6 +44,7 @@ Common optional properties are:
 - `dependencyConfig`, which configures dependency behavior
 - `dataSource`, which names a registered async option handler
 - `asyncValidation`, which names a registered async validator
+- `upload`, required when `type` is `file`
 
 The parser preserves unknown properties in `additionalProperties`. This lets a
 consumer safely parse properties introduced by later releases.
@@ -121,6 +122,39 @@ or `SkyloomForm`. Optional properties are `search`, `pageSize`,
 `asyncValidation.handler` similarly names a Dart validation callback. Its
 optional `debounceMilliseconds` and `cache` properties control request timing
 and result reuse. Executable callbacks are never stored in the JSON schema.
+
+## File uploads
+
+A file field declares upload constraints and the name of an application-owned
+handler. It never embeds a picker, callback, token, or binary content in the
+schema.
+
+```json
+{
+  "key": "documents",
+  "type": "file",
+  "label": "Documents",
+  "upload": {
+    "handler": "documentUpload",
+    "multiple": true,
+    "accept": ["application/pdf", "image/*", ".docx"],
+    "maxBytes": 5000000,
+    "maxFiles": 3
+  }
+}
+```
+
+- `handler` is a required non-empty string.
+- `multiple` defaults to `false`.
+- `accept` is an optional array of MIME types, MIME wildcards, or extensions.
+- `maxBytes` is an optional positive per-file byte limit.
+- `maxFiles` is positive, defaults to `1` for single uploads and `10` for
+  multiple uploads, and must be `1` when `multiple` is false.
+
+A single field value is an uploaded-file object; a multiple field value is an
+array of those objects. Each object requires non-empty `id` and `name` strings
+and may contain `url`, `mimeType`, non-negative `size`, and JSON-compatible
+`metadata`. Values are upload references, not local paths or binary bytes.
 
 ## UI schema
 
@@ -226,3 +260,13 @@ JSON-encodable copy.
 
 Invalid input throws `SchemaParseException`. The exception contains a JSON path
 such as `$.fields[1].key` so tooling can point to the failing definition.
+
+`SchemaParser.validate` provides the accumulating alternative. It returns a
+`SchemaValidationResult` containing machine-readable `SchemaDiagnostic`
+objects with `code`, `path`, `message`, and `severity`, plus the parsed schema
+when no errors prevent parsing.
+
+`SchemaLimits` protects remote and generated definitions by bounding total
+fields, field nesting, declared array items, options per field, condition
+nesting, and condition nodes. `SchemaUnknownFieldTypePolicy` can allow, warn,
+or reject field types outside the parser's configurable known-type set.

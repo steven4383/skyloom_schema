@@ -3,6 +3,7 @@ import 'async_validation_schema.dart';
 import 'data_source_schema.dart';
 import 'dependency_schema.dart';
 import 'field_option.dart';
+import 'file_upload_schema.dart';
 import 'validation_schema.dart';
 
 /// Immutable definition of one form field.
@@ -32,6 +33,7 @@ final class FieldSchema {
     this.dependency = const DependencySchema(),
     this.dataSource,
     this.asyncValidation,
+    this.fileUpload,
     this.validation,
     Map<String, Object?> metadata = const {},
     Map<String, Object?> additionalProperties = const {},
@@ -76,6 +78,7 @@ final class FieldSchema {
   final DependencySchema dependency;
   final DataSourceSchema? dataSource;
   final AsyncValidationSchema? asyncValidation;
+  final FileUploadSchema? fileUpload;
   final ValidationSchema? validation;
   final Map<String, Object?> metadata;
 
@@ -109,6 +112,7 @@ final class FieldSchema {
         'dependencyConfig': dependency.toJson(),
       if (dataSource != null) 'dataSource': dataSource!.toJson(),
       if (asyncValidation != null) 'asyncValidation': asyncValidation!.toJson(),
+      if (fileUpload != null) 'upload': fileUpload!.toJson(),
       if (validation != null) 'validation': validation!.toJson(),
       if (metadata.isNotEmpty) 'metadata': _thawMap(metadata),
     };

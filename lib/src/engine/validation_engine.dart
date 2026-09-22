@@ -2,15 +2,33 @@ import '../schema/field_schema.dart';
 import '../schema/form_type.dart';
 import '../schema/validation_rule.dart';
 import '../utils/path_utils.dart';
+import 'file_upload.dart';
+import 'skyloom_messages.dart';
+import 'validation_error.dart';
 
 /// Executes the built-in synchronous validation rules.
 final class ValidationEngine {
-  const ValidationEngine();
+  const ValidationEngine({this.messages = const EnglishSkyloomMessages()});
+
+  final SkyloomMessages messages;
 
   static final RegExp _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   /// Returns the first validation message, or `null` when [value] is valid.
   String? validateField(
+    FieldSchema field,
+    Object? value,
+    Map<String, Object?> formValues, {
+    bool? requiredOverride,
+  }) => validateFieldError(
+    field,
+    value,
+    formValues,
+    requiredOverride: requiredOverride,
+  )?.message;
+
+  /// Returns the first structured validation error, or `null` when valid.
+  SkyloomValidationError? validateFieldError(
     FieldSchema field,
     Object? value,
     Map<String, Object?> formValues, {
@@ -25,25 +43,31 @@ final class ValidationEngine {
     final isMissing =
         _isEmpty(value) || (field.type == FormType.checkbox && value == false);
     if (isRequired && isMissing) {
-      return _message(requiredRule) ?? '$label is required.';
+      return _error(SkyloomValidationCode.required, label, rule: requiredRule);
     }
 
     if (field.type == FormType.object && value is! Map<Object?, Object?>) {
       if (_isEmpty(value)) return null;
-      return '$label must be an object.';
+      return _error(SkyloomValidationCode.expectedObject, label);
     }
     if (field.type == FormType.array) {
       if (value is! List<Object?>) {
         if (_isEmpty(value)) return null;
-        return '$label must be an array.';
+        return _error(SkyloomValidationCode.expectedArray, label);
       }
       if (field.minItems != null && value.length < field.minItems!) {
-        final noun = field.minItems == 1 ? 'item' : 'items';
-        return '$label must contain at least ${field.minItems} $noun.';
+        return _error(
+          SkyloomValidationCode.minItems,
+          label,
+          arguments: {'limit': field.minItems},
+        );
       }
       if (field.maxItems != null && value.length > field.maxItems!) {
-        final noun = field.maxItems == 1 ? 'item' : 'items';
-        return '$label must contain at most ${field.maxItems} $noun.';
+        return _error(
+          SkyloomValidationCode.maxItems,
+          label,
+          arguments: {'limit': field.maxItems},
+        );
       }
     }
 
@@ -54,16 +78,24 @@ final class ValidationEngine {
     if (minLength != null &&
         value is String &&
         value.length < minLength.toInt()) {
-      return _message(rules[ValidationRule.minLength]) ??
-          '$label must contain at least ${minLength.toInt()} characters.';
+      return _error(
+        SkyloomValidationCode.minLength,
+        label,
+        rule: rules[ValidationRule.minLength],
+        arguments: {'limit': minLength.toInt()},
+      );
     }
 
     final maxLength = _numberValue(rules[ValidationRule.maxLength]);
     if (maxLength != null &&
         value is String &&
         value.length > maxLength.toInt()) {
-      return _message(rules[ValidationRule.maxLength]) ??
-          '$label must contain at most ${maxLength.toInt()} characters.';
+      return _error(
+        SkyloomValidationCode.maxLength,
+        label,
+        rule: rules[ValidationRule.maxLength],
+        arguments: {'limit': maxLength.toInt()},
+      );
     }
 
     final numericValue = value is num
@@ -72,38 +104,102 @@ final class ValidationEngine {
         ? num.tryParse(value)
         : null;
     if (field.type == FormType.number && numericValue == null) {
-      return '$label must be a valid number.';
+      return _error(SkyloomValidationCode.invalidNumber, label);
     }
     final min = _numberValue(rules[ValidationRule.min]);
     if (min != null && numericValue != null && numericValue < min) {
-      return _message(rules[ValidationRule.min]) ??
-          '$label must be at least $min.';
+      return _error(
+        SkyloomValidationCode.min,
+        label,
+        rule: rules[ValidationRule.min],
+        arguments: {'limit': min},
+      );
     }
 
     final max = _numberValue(rules[ValidationRule.max]);
     if (max != null && numericValue != null && numericValue > max) {
-      return _message(rules[ValidationRule.max]) ??
-          '$label must be at most $max.';
+      return _error(
+        SkyloomValidationCode.max,
+        label,
+        rule: rules[ValidationRule.max],
+        arguments: {'limit': max},
+      );
     }
 
     if (field.type == FormType.date) {
       final dateValue = _dateValue(value);
-      if (dateValue == null) return '$label must be a valid date.';
+      if (dateValue == null) {
+        return _error(SkyloomValidationCode.invalidDate, label);
+      }
 
       final minDateRule = rules[ValidationRule.minDate];
       final minDateText = _stringValue(minDateRule);
       final minDate = _dateValue(minDateText);
       if (minDate != null && dateValue.isBefore(minDate)) {
-        return _message(minDateRule) ??
-            '$label must be on or after ${_formatDate(minDate)}.';
+        return _error(
+          SkyloomValidationCode.minDate,
+          label,
+          rule: minDateRule,
+          arguments: {'limit': _formatDate(minDate)},
+        );
       }
 
       final maxDateRule = rules[ValidationRule.maxDate];
       final maxDateText = _stringValue(maxDateRule);
       final maxDate = _dateValue(maxDateText);
       if (maxDate != null && dateValue.isAfter(maxDate)) {
-        return _message(maxDateRule) ??
-            '$label must be on or before ${_formatDate(maxDate)}.';
+        return _error(
+          SkyloomValidationCode.maxDate,
+          label,
+          rule: maxDateRule,
+          arguments: {'limit': _formatDate(maxDate)},
+        );
+      }
+    }
+
+    if (field.type == FormType.file) {
+      final config = field.fileUpload;
+      final rawFiles = config?.multiple == true
+          ? value is List<Object?>
+                ? value
+                : null
+          : value is Map<Object?, Object?>
+          ? <Object?>[value]
+          : null;
+      final files = rawFiles
+          ?.map(SkyloomUploadedFile.tryParse)
+          .whereType<SkyloomUploadedFile>()
+          .toList(growable: false);
+      if (config == null ||
+          rawFiles == null ||
+          files == null ||
+          files.length != rawFiles.length) {
+        return _error(SkyloomValidationCode.uploadInvalidValue, label);
+      }
+      if (files.length > config.maxFiles) {
+        return _error(
+          SkyloomValidationCode.uploadMaxFiles,
+          label,
+          arguments: {'limit': config.maxFiles},
+        );
+      }
+      if (config.maxBytes != null &&
+          files.any(
+            (file) => file.size != null && file.size! > config.maxBytes!,
+          )) {
+        return _error(
+          SkyloomValidationCode.uploadMaxBytes,
+          label,
+          arguments: {'limit': config.maxBytes},
+        );
+      }
+      if (config.accept.isNotEmpty &&
+          files.any((file) => !_acceptsFile(file, config.accept))) {
+        return _error(
+          SkyloomValidationCode.uploadInvalidType,
+          label,
+          arguments: {'accept': config.accept},
+        );
       }
     }
 
@@ -112,47 +208,45 @@ final class ValidationEngine {
         field.type == FormType.email || _enabled(emailRule);
     if (shouldValidateEmail &&
         (value is! String || !_emailPattern.hasMatch(value))) {
-      return _message(emailRule) ?? 'Enter a valid email address.';
+      return _error(SkyloomValidationCode.invalidEmail, label, rule: emailRule);
     }
 
     final urlRule = rules[ValidationRule.url];
     if (_enabled(urlRule) && !_isUrl(value)) {
-      return _message(urlRule) ?? 'Enter a valid URL.';
+      return _error(SkyloomValidationCode.invalidUrl, label, rule: urlRule);
     }
 
     final sameAsRule = rules[ValidationRule.sameAs];
     final sameAsPath = _stringValue(sameAsRule);
     if (sameAsPath != null &&
         !_deepEquals(value, PathUtils.getValue(formValues, sameAsPath))) {
-      return _message(sameAsRule) ?? '$label must match $sameAsPath.';
+      return _error(
+        SkyloomValidationCode.sameAs,
+        label,
+        rule: sameAsRule,
+        arguments: {'path': sameAsPath},
+      );
     }
 
     final notSameAsRule = rules[ValidationRule.notSameAs];
     final notSameAsPath = _stringValue(notSameAsRule);
     if (notSameAsPath != null &&
         _deepEquals(value, PathUtils.getValue(formValues, notSameAsPath))) {
-      return _message(notSameAsRule) ?? '$label must not match $notSameAsPath.';
+      return _error(
+        SkyloomValidationCode.notSameAs,
+        label,
+        rule: notSameAsRule,
+        arguments: {'path': notSameAsPath},
+      );
     }
 
-    final comparisonRules = <(String, String, bool Function(int))>[
-      (
-        ValidationRule.greaterThan,
-        'be greater than',
-        (comparison) => comparison > 0,
-      ),
-      (
-        ValidationRule.greaterThanOrEqual,
-        'be greater than or equal to',
-        (comparison) => comparison >= 0,
-      ),
-      (ValidationRule.lessThan, 'be less than', (comparison) => comparison < 0),
-      (
-        ValidationRule.lessThanOrEqual,
-        'be less than or equal to',
-        (comparison) => comparison <= 0,
-      ),
+    final comparisonRules = <(String, bool Function(int))>[
+      (ValidationRule.greaterThan, (comparison) => comparison > 0),
+      (ValidationRule.greaterThanOrEqual, (comparison) => comparison >= 0),
+      (ValidationRule.lessThan, (comparison) => comparison < 0),
+      (ValidationRule.lessThanOrEqual, (comparison) => comparison <= 0),
     ];
-    for (final (ruleName, description, predicate) in comparisonRules) {
+    for (final (ruleName, predicate) in comparisonRules) {
       final rule = rules[ruleName];
       final otherPath = _stringValue(rule);
       if (otherPath == null) continue;
@@ -161,7 +255,12 @@ final class ValidationEngine {
         PathUtils.getValue(formValues, otherPath),
       );
       if (comparison == null || !predicate(comparison)) {
-        return _message(rule) ?? '$label must $description $otherPath.';
+        return _error(
+          ruleName,
+          label,
+          rule: rule,
+          arguments: {'path': otherPath},
+        );
       }
     }
 
@@ -171,14 +270,33 @@ final class ValidationEngine {
     if (pattern != null) {
       try {
         if (value is! String || !RegExp(pattern).hasMatch(value)) {
-          return _message(patternRule) ?? '$label has an invalid format.';
+          return _error(
+            SkyloomValidationCode.invalidPattern,
+            label,
+            rule: patternRule,
+          );
         }
       } on FormatException {
-        return '$label has an invalid validation pattern.';
+        return _error(SkyloomValidationCode.invalidPattern, label);
       }
     }
 
     return null;
+  }
+
+  SkyloomValidationError _error(
+    String code,
+    String label, {
+    Object? rule,
+    Map<String, Object?> arguments = const {},
+  }) {
+    return SkyloomValidationError(
+      code: code,
+      message:
+          _message(rule) ??
+          messages.validationMessage(code, label: label, arguments: arguments),
+      arguments: arguments,
+    );
   }
 
   bool _enabled(Object? rule) {
@@ -223,6 +341,21 @@ final class ValidationEngine {
     return uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         uri.host.isNotEmpty;
+  }
+
+  bool _acceptsFile(SkyloomUploadedFile file, List<String> acceptedTypes) {
+    final mimeType = file.mimeType?.toLowerCase();
+    final lowerName = file.name.toLowerCase();
+    return acceptedTypes.any((rawPattern) {
+      final pattern = rawPattern.trim().toLowerCase();
+      if (pattern.isEmpty) return false;
+      if (pattern.startsWith('.')) return lowerName.endsWith(pattern);
+      if (pattern.endsWith('/*')) {
+        final prefix = pattern.substring(0, pattern.length - 1);
+        return mimeType?.startsWith(prefix) ?? false;
+      }
+      return mimeType == pattern;
+    });
   }
 
   int? _compare(Object? left, Object? right) {

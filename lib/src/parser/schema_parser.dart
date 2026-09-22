@@ -1,8 +1,10 @@
 import '../errors/schema_parse_exception.dart';
+import '../errors/schema_diagnostic.dart';
 import '../schema/dependency_schema.dart';
 import '../schema/data_source_schema.dart';
 import '../schema/async_validation_schema.dart';
 import '../schema/field_option.dart';
+import '../schema/file_upload_schema.dart';
 import '../schema/field_schema.dart';
 import '../schema/form_type.dart';
 import '../schema/form_schema.dart';
@@ -11,16 +13,58 @@ import '../schema/ui_schema.dart';
 import '../schema/section_schema.dart';
 import '../schema/step_schema.dart';
 import '../utils/json_value_utils.dart';
+import 'schema_limits.dart';
 
 /// Parses and validates JSON-compatible Skyloom form definitions.
 final class SchemaParser {
-  const SchemaParser();
+  const SchemaParser({
+    this.limits = const SchemaLimits(),
+    this.unknownFieldTypePolicy = SchemaUnknownFieldTypePolicy.allow,
+    this.knownFieldTypes = FormType.builtInTypes,
+  });
+
+  final SchemaLimits limits;
+  final SchemaUnknownFieldTypePolicy unknownFieldTypePolicy;
+  final Set<String> knownFieldTypes;
 
   static final RegExp _fieldPathPattern = RegExp(
     r'^[A-Za-z_][A-Za-z0-9_-]*(?:\[\d+\])*(?:\.[A-Za-z_][A-Za-z0-9_-]*(?:\[\d+\])*)*$',
   );
 
+  /// Validates a schema and reports independent errors and warnings together.
+  SchemaValidationResult validate(Object? source) {
+    final diagnostics = _collectDiagnostics(source);
+    FormSchema? schema;
+    try {
+      schema = parse(source);
+    } on SchemaParseException catch (error) {
+      final duplicate = diagnostics.any(
+        (item) => item.path == error.path && item.message == error.message,
+      );
+      if (!duplicate) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.parse',
+            message: error.message,
+            path: error.path,
+          ),
+        );
+      }
+    }
+    return SchemaValidationResult(diagnostics: diagnostics, schema: schema);
+  }
+
   FormSchema parse(Object? source) {
+    final guardError = _collectDiagnostics(source).where(
+      (item) =>
+          item.severity == SchemaDiagnosticSeverity.error &&
+          (item.code.startsWith('limit.') ||
+              item.code == 'schema.unknownFieldType'),
+    );
+    if (guardError.isNotEmpty) {
+      final error = guardError.first;
+      throw SchemaParseException(error.message, path: error.path);
+    }
     final json = _object(source, r'$');
     final fieldsValue = json['fields'];
     if (fieldsValue is! List<Object?>) {
@@ -279,6 +323,62 @@ final class SchemaParser {
       );
     }
 
+    FileUploadSchema? fileUpload;
+    if (json.containsKey('upload')) {
+      final config = _object(json['upload'], '$path.upload');
+      final multiple = _optionalBool(
+        config,
+        'multiple',
+        '$path.upload.multiple',
+      );
+      final maxBytes = _optionalInt(
+        config,
+        'maxBytes',
+        '$path.upload.maxBytes',
+      );
+      final maxFiles =
+          _optionalInt(config, 'maxFiles', '$path.upload.maxFiles') ??
+          (multiple ? 10 : 1);
+      if (maxBytes != null && maxBytes <= 0) {
+        throw SchemaParseException(
+          'Upload maxBytes must be positive.',
+          path: '$path.upload.maxBytes',
+        );
+      }
+      if (maxFiles <= 0 || maxFiles > limits.maxArrayItems) {
+        throw SchemaParseException(
+          'Upload maxFiles must be between 1 and ${limits.maxArrayItems}.',
+          path: '$path.upload.maxFiles',
+        );
+      }
+      if (!multiple && maxFiles != 1) {
+        throw SchemaParseException(
+          'Single-file uploads require maxFiles to be 1.',
+          path: '$path.upload.maxFiles',
+        );
+      }
+      final accept = _stringList(config, 'accept', '$path.upload.accept');
+      if (accept.any((value) => value.trim().isEmpty)) {
+        throw SchemaParseException(
+          'Upload accept entries must not be empty.',
+          path: '$path.upload.accept',
+        );
+      }
+      fileUpload = FileUploadSchema(
+        handler: _requiredString(config, 'handler', '$path.upload.handler'),
+        multiple: multiple,
+        accept: accept,
+        maxBytes: maxBytes,
+        maxFiles: maxFiles,
+      );
+    }
+    if (type == FormType.file && fileUpload == null) {
+      throw SchemaParseException(
+        'File fields require an "upload" configuration.',
+        path: '$path.upload',
+      );
+    }
+
     final optionsValue = json['options'];
     List<FieldOption>? options;
     if (optionsValue != null) {
@@ -342,6 +442,7 @@ final class SchemaParser {
       dependency: dependency,
       dataSource: dataSource,
       asyncValidation: asyncValidation,
+      fileUpload: fileUpload,
       validation: validation,
       metadata: _optionalObject(json, 'metadata', '$path.metadata'),
       additionalProperties: _additionalProperties(json, const {
@@ -366,6 +467,7 @@ final class SchemaParser {
         'dependencyConfig',
         'dataSource',
         'asyncValidation',
+        'upload',
         'validation',
         'metadata',
       }, path),
@@ -718,6 +820,550 @@ final class SchemaParser {
       for (final entry in json.entries)
         if (!knownKeys.contains(entry.key))
           entry.key: freezeJsonValue(entry.value, path: '$path.${entry.key}'),
+    };
+  }
+
+  List<SchemaDiagnostic> _collectDiagnostics(Object? source) {
+    final diagnostics = <SchemaDiagnostic>[];
+    void report(String code, String message, String path) {
+      diagnostics.add(
+        SchemaDiagnostic(code: code, message: message, path: path),
+      );
+    }
+
+    if (source is! Map<Object?, Object?>) {
+      diagnostics.add(
+        const SchemaDiagnostic(
+          code: 'schema.expectedObject',
+          message: 'Expected a JSON object.',
+          path: r'$',
+        ),
+      );
+      return diagnostics;
+    }
+    final root = _stringKeyedMap(source);
+    if (root == null) {
+      diagnostics.add(
+        const SchemaDiagnostic(
+          code: 'schema.nonStringKey',
+          message: 'JSON object keys must be strings.',
+          path: r'$',
+        ),
+      );
+      return diagnostics;
+    }
+    if (root['id'] is! String || (root['id']! as String).trim().isEmpty) {
+      diagnostics.add(
+        const SchemaDiagnostic(
+          code: 'schema.requiredString',
+          message: 'Required property "id" must be a non-empty string.',
+          path: r'$.id',
+        ),
+      );
+    }
+    for (final property in const ['schemaVersion', 'title', 'description']) {
+      if (root.containsKey(property) && root[property] is! String) {
+        report(
+          'schema.expectedString',
+          'Property "$property" must be a string.',
+          r'$.' + property,
+        );
+      }
+    }
+    if (root.containsKey('metadata') &&
+        root['metadata'] is! Map<Object?, Object?>) {
+      report(
+        'schema.expectedObject',
+        'Property "metadata" must be an object.',
+        r'$.metadata',
+      );
+    }
+    final fields = root['fields'];
+    if (fields is! List<Object?>) {
+      diagnostics.add(
+        const SchemaDiagnostic(
+          code: 'schema.requiredArray',
+          message: 'Required property "fields" must be an array.',
+          path: r'$.fields',
+        ),
+      );
+      return diagnostics;
+    }
+
+    var fieldCount = 0;
+    var conditionNodes = 0;
+    var fieldLimitReported = false;
+    var conditionNodeLimitReported = false;
+
+    void inspectCondition(Object? value, String path, int depth) {
+      if (value == null) return;
+      conditionNodes++;
+      if (conditionNodes > limits.maxConditionNodes &&
+          !conditionNodeLimitReported) {
+        conditionNodeLimitReported = true;
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.conditionNodes',
+            message:
+                'Condition graph exceeds ${limits.maxConditionNodes} nodes.',
+            path: path,
+          ),
+        );
+      }
+      if (depth > limits.maxConditionDepth) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.conditionDepth',
+            message:
+                'Condition nesting exceeds ${limits.maxConditionDepth} levels.',
+            path: path,
+          ),
+        );
+        return;
+      }
+      if (value is Map<Object?, Object?>) {
+        for (final entry in value.entries) {
+          if (entry.key == 'all' || entry.key == 'any') {
+            final children = entry.value;
+            if (children is List<Object?>) {
+              for (var index = 0; index < children.length; index++) {
+                inspectCondition(
+                  children[index],
+                  '$path.${entry.key}[$index]',
+                  depth + 1,
+                );
+              }
+            }
+          } else if (entry.key == 'not') {
+            inspectCondition(entry.value, '$path.not', depth + 1);
+          }
+        }
+      }
+    }
+
+    void inspectField(
+      Object? value,
+      String path,
+      int depth, {
+      bool requireKey = true,
+    }) {
+      fieldCount++;
+      if (fieldCount > limits.maxFields && !fieldLimitReported) {
+        fieldLimitReported = true;
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.fields',
+            message: 'Schema exceeds ${limits.maxFields} fields.',
+            path: path,
+          ),
+        );
+      }
+      if (depth > limits.maxNestingDepth) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.nestingDepth',
+            message: 'Field nesting exceeds ${limits.maxNestingDepth} levels.',
+            path: path,
+          ),
+        );
+        return;
+      }
+      if (value is! Map<Object?, Object?>) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.expectedFieldObject',
+            message: 'Expected a field object.',
+            path: path,
+          ),
+        );
+        return;
+      }
+      final field = _stringKeyedMap(value);
+      if (field == null) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.nonStringKey',
+            message: 'JSON object keys must be strings.',
+            path: path,
+          ),
+        );
+        return;
+      }
+      final key = field['key'];
+      if ((requireKey || field.containsKey('key')) &&
+          (key is! String || key.trim().isEmpty)) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.requiredString',
+            message: 'Required property "key" must be a non-empty string.',
+            path: '$path.key',
+          ),
+        );
+      }
+      if (key is String && key.isNotEmpty && !_fieldPathPattern.hasMatch(key)) {
+        report(
+          'schema.invalidFieldPath',
+          'Field key "$key" is not a valid value path.',
+          '$path.key',
+        );
+      }
+      final type = field['type'];
+      if (type is! String || type.trim().isEmpty) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.requiredString',
+            message: 'Required property "type" must be a non-empty string.',
+            path: '$path.type',
+          ),
+        );
+      } else if (!knownFieldTypes.contains(type) &&
+          unknownFieldTypePolicy != SchemaUnknownFieldTypePolicy.allow) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'schema.unknownFieldType',
+            message: 'Field type "$type" has no registered built-in type.',
+            path: '$path.type',
+            severity:
+                unknownFieldTypePolicy == SchemaUnknownFieldTypePolicy.error
+                ? SchemaDiagnosticSeverity.error
+                : SchemaDiagnosticSeverity.warning,
+          ),
+        );
+      }
+      for (final property in const [
+        'label',
+        'description',
+        'helperText',
+        'placeholder',
+      ]) {
+        if (field.containsKey(property) && field[property] is! String) {
+          report(
+            'schema.expectedString',
+            'Property "$property" must be a string.',
+            '$path.$property',
+          );
+        }
+      }
+      for (final property in const [
+        'required',
+        'disabled',
+        'readOnly',
+        'hidden',
+      ]) {
+        if (field.containsKey(property) && field[property] is! bool) {
+          report(
+            'schema.expectedBoolean',
+            'Property "$property" must be a boolean.',
+            '$path.$property',
+          );
+        }
+      }
+      final options = field['options'];
+      if (field.containsKey('options') && options is! List<Object?>) {
+        report(
+          'schema.expectedArray',
+          'Property "options" must be an array.',
+          '$path.options',
+        );
+      }
+      if (options is List<Object?> &&
+          options.length > limits.maxOptionsPerField) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.options',
+            message: 'Field options exceed ${limits.maxOptionsPerField} items.',
+            path: '$path.options',
+          ),
+        );
+      }
+      if (options is List<Object?>) {
+        for (var index = 0; index < options.length; index++) {
+          final optionPath = '$path.options[$index]';
+          final option = options[index];
+          if (option is! Map<Object?, Object?>) {
+            report(
+              'schema.expectedOptionObject',
+              'Expected an option object.',
+              optionPath,
+            );
+            continue;
+          }
+          final normalized = _stringKeyedMap(option);
+          if (normalized == null) {
+            report(
+              'schema.nonStringKey',
+              'JSON object keys must be strings.',
+              optionPath,
+            );
+            continue;
+          }
+          if (normalized['label'] is! String ||
+              (normalized['label']! as String).trim().isEmpty) {
+            report(
+              'schema.requiredString',
+              'Required property "label" must be a non-empty string.',
+              '$optionPath.label',
+            );
+          }
+          if (!normalized.containsKey('value')) {
+            report(
+              'schema.requiredProperty',
+              'Required property "value" is missing.',
+              '$optionPath.value',
+            );
+          }
+        }
+      }
+      final minItems = field['minItems'];
+      final maxItems = field['maxItems'];
+      if (field.containsKey('minItems') && minItems is! int) {
+        report(
+          'schema.expectedInteger',
+          'Property "minItems" must be an integer.',
+          '$path.minItems',
+        );
+      } else if (minItems is int && minItems < 0) {
+        report(
+          'schema.invalidRange',
+          'Property "minItems" cannot be negative.',
+          '$path.minItems',
+        );
+      }
+      if (field.containsKey('maxItems') && maxItems is! int) {
+        report(
+          'schema.expectedInteger',
+          'Property "maxItems" must be an integer.',
+          '$path.maxItems',
+        );
+      } else if (maxItems is int && maxItems < 0) {
+        report(
+          'schema.invalidRange',
+          'Property "maxItems" cannot be negative.',
+          '$path.maxItems',
+        );
+      }
+      if (minItems is int && maxItems is int && minItems > maxItems) {
+        report(
+          'schema.invalidRange',
+          'Property "minItems" cannot exceed "maxItems".',
+          '$path.minItems',
+        );
+      }
+      if (maxItems is int && maxItems > limits.maxArrayItems) {
+        diagnostics.add(
+          SchemaDiagnostic(
+            code: 'limit.arrayItems',
+            message:
+                'Array maxItems exceeds the limit of ${limits.maxArrayItems}.',
+            path: '$path.maxItems',
+          ),
+        );
+      }
+      if (field.containsKey('validation') &&
+          field['validation'] is! Map<Object?, Object?>) {
+        report(
+          'schema.expectedObject',
+          'Property "validation" must be an object.',
+          '$path.validation',
+        );
+      }
+      if (field.containsKey('metadata') &&
+          field['metadata'] is! Map<Object?, Object?>) {
+        report(
+          'schema.expectedObject',
+          'Property "metadata" must be an object.',
+          '$path.metadata',
+        );
+      }
+
+      final upload = field['upload'];
+      if (type == FormType.file && upload is! Map<Object?, Object?>) {
+        report(
+          'schema.requiredUpload',
+          'File fields require an "upload" configuration.',
+          '$path.upload',
+        );
+      } else if (upload != null && upload is! Map<Object?, Object?>) {
+        report(
+          'schema.expectedObject',
+          'Property "upload" must be an object.',
+          '$path.upload',
+        );
+      } else if (upload is Map<Object?, Object?>) {
+        final normalized = _stringKeyedMap(upload);
+        if (normalized == null) {
+          report(
+            'schema.nonStringKey',
+            'JSON object keys must be strings.',
+            '$path.upload',
+          );
+        } else {
+          if (normalized['handler'] is! String ||
+              (normalized['handler']! as String).trim().isEmpty) {
+            report(
+              'schema.requiredString',
+              'Required property "handler" must be a non-empty string.',
+              '$path.upload.handler',
+            );
+          }
+          if (normalized.containsKey('multiple') &&
+              normalized['multiple'] is! bool) {
+            report(
+              'schema.expectedBoolean',
+              'Property "multiple" must be a boolean.',
+              '$path.upload.multiple',
+            );
+          }
+          final accept = normalized['accept'];
+          if (accept != null &&
+              (accept is! List<Object?> ||
+                  accept.any((item) => item is! String))) {
+            report(
+              'schema.expectedStringArray',
+              'Property "accept" must be an array of strings.',
+              '$path.upload.accept',
+            );
+          } else if (accept is List<Object?> &&
+              accept.cast<String>().any((item) => item.trim().isEmpty)) {
+            report(
+              'schema.emptyUploadAccept',
+              'Upload accept entries must not be empty.',
+              '$path.upload.accept',
+            );
+          }
+          for (final property in const ['maxBytes', 'maxFiles']) {
+            final limit = normalized[property];
+            if (limit != null && (limit is! int || limit <= 0)) {
+              report(
+                'schema.expectedPositiveInteger',
+                'Property "$property" must be a positive integer.',
+                '$path.upload.$property',
+              );
+            }
+          }
+          final multiple = normalized['multiple'] == true;
+          final uploadMaxFiles = normalized['maxFiles'];
+          if (!multiple && uploadMaxFiles is int && uploadMaxFiles != 1) {
+            report(
+              'schema.invalidUploadMaxFiles',
+              'Single-file uploads require maxFiles to be 1.',
+              '$path.upload.maxFiles',
+            );
+          }
+          if (uploadMaxFiles is int && uploadMaxFiles > limits.maxArrayItems) {
+            report(
+              'limit.uploadFiles',
+              'Upload maxFiles exceeds the limit of '
+                  '${limits.maxArrayItems}.',
+              '$path.upload.maxFiles',
+            );
+          }
+        }
+      }
+      for (final conditionName in const [
+        'visibleWhen',
+        'requiredWhen',
+        'enabledWhen',
+        'disabledWhen',
+        'readOnlyWhen',
+      ]) {
+        if (field.containsKey(conditionName)) {
+          inspectCondition(field[conditionName], '$path.$conditionName', 1);
+        }
+      }
+      final children = field['fields'];
+      if (type == FormType.object && children is! List<Object?>) {
+        report(
+          'schema.requiredFields',
+          'Object fields require a "fields" array.',
+          '$path.fields',
+        );
+      } else if (children != null && children is! List<Object?>) {
+        report(
+          'schema.expectedArray',
+          'Property "fields" must be an array.',
+          '$path.fields',
+        );
+      }
+      if (children is List<Object?>) {
+        final childKeys = <String>{};
+        for (var index = 0; index < children.length; index++) {
+          final child = children[index];
+          inspectField(child, '$path.fields[$index]', depth + 1);
+          if (child is Map<Object?, Object?> && child['key'] is String) {
+            final childKey = child['key']! as String;
+            if (!childKeys.add(childKey)) {
+              report(
+                'schema.duplicateField',
+                'Field key "$childKey" is duplicated.',
+                '$path.fields[$index].key',
+              );
+            }
+          }
+        }
+      }
+      if (type == FormType.array && !field.containsKey('items')) {
+        report(
+          'schema.requiredItems',
+          'Array fields require an "items" schema.',
+          '$path.items',
+        );
+      }
+      if (field.containsKey('items')) {
+        inspectField(
+          field['items'],
+          '$path.items',
+          depth + 1,
+          requireKey: false,
+        );
+      }
+    }
+
+    final rootKeys = <String>{};
+    for (var index = 0; index < fields.length; index++) {
+      final value = fields[index];
+      inspectField(
+        value,
+        r'$.fields'
+        '[$index]',
+        1,
+      );
+      if (value is Map<Object?, Object?> && value['key'] is String) {
+        final key = value['key']! as String;
+        if (!rootKeys.add(key)) {
+          diagnostics.add(
+            SchemaDiagnostic(
+              code: 'schema.duplicateField',
+              message: 'Field key "$key" is duplicated.',
+              path:
+                  r'$.fields'
+                  '[$index].key',
+            ),
+          );
+        }
+      }
+    }
+    final steps = root['steps'];
+    if (steps is List<Object?>) {
+      for (var index = 0; index < steps.length; index++) {
+        final step = steps[index];
+        if (step is Map<Object?, Object?> && step.containsKey('visibleWhen')) {
+          inspectCondition(
+            step['visibleWhen'],
+            r'$.steps'
+            '[$index].visibleWhen',
+            1,
+          );
+        }
+      }
+    }
+    return diagnostics;
+  }
+
+  Map<String, Object?>? _stringKeyedMap(Map<Object?, Object?> value) {
+    if (value.keys.any((key) => key is! String)) return null;
+    return <String, Object?>{
+      for (final entry in value.entries) entry.key! as String: entry.value,
     };
   }
 }

@@ -1,109 +1,1202 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:skyloom_schema/skyloom_schema.dart';
 
-const employeeSchema = <String, Object?>{
-  'schemaVersion': '1.0',
-  'id': 'employee_registration',
-  'title': 'Employee Registration',
-  'fields': [
-    {
+void main() => runApp(const SkyloomDocsApp());
+
+class SkyloomDocsApp extends StatelessWidget {
+  const SkyloomDocsApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF276B5D),
+      brightness: Brightness.light,
+      surface: const Color(0xFFF6F8F7),
+    );
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Skyloom Schema Docs',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: colors,
+        scaffoldBackgroundColor: colors.surface,
+        cardTheme: CardThemeData(
+          elevation: 0,
+          color: colors.surfaceContainerLowest,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.outlineVariant),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: colors.surfaceContainerLowest,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: colors.outlineVariant),
+          ),
+        ),
+      ),
+      home: const DocsShell(),
+    );
+  }
+}
+
+class DocsShell extends StatefulWidget {
+  const DocsShell({super.key});
+
+  @override
+  State<DocsShell> createState() => _DocsShellState();
+}
+
+class _DocsShellState extends State<DocsShell> {
+  int selected = 0;
+
+  static const pages = <Widget>[
+    ComponentCatalogPage(),
+    SchemaReferencePage(),
+    FeatureGuidesPage(),
+  ];
+  static const destinations = [
+    ('Components', Icons.grid_view_outlined, Icons.grid_view),
+    ('Schema API', Icons.data_object_outlined, Icons.data_object),
+    ('Guides', Icons.menu_book_outlined, Icons.menu_book),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, size) {
+        final desktop = size.maxWidth >= 960;
+        final content = IndexedStack(index: selected, children: pages);
+        return Scaffold(
+          appBar: desktop
+              ? null
+              : AppBar(
+                  title: const _Brand(showName: true),
+                  actions: const [
+                    Padding(
+                      padding: EdgeInsets.only(right: 16),
+                      child: _VersionBadge(),
+                    ),
+                  ],
+                ),
+          body: desktop
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: selected,
+                      onDestinationSelected: selectPage,
+                      extended: size.maxWidth >= 1240,
+                      minExtendedWidth: 220,
+                      leading: const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 22, 16, 30),
+                        child: _Brand(showName: true),
+                      ),
+                      trailing: const Expanded(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 20),
+                            child: _VersionBadge(),
+                          ),
+                        ),
+                      ),
+                      destinations: [
+                        for (final item in destinations)
+                          NavigationRailDestination(
+                            icon: Icon(item.$2),
+                            selectedIcon: Icon(item.$3),
+                            label: Text(item.$1),
+                          ),
+                      ],
+                    ),
+                    VerticalDivider(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    Expanded(child: content),
+                  ],
+                )
+              : content,
+          bottomNavigationBar: desktop
+              ? null
+              : NavigationBar(
+                  selectedIndex: selected,
+                  onDestinationSelected: selectPage,
+                  destinations: [
+                    for (final item in destinations)
+                      NavigationDestination(
+                        icon: Icon(item.$2),
+                        selectedIcon: Icon(item.$3),
+                        label: item.$1,
+                      ),
+                  ],
+                ),
+        );
+      },
+    );
+  }
+
+  void selectPage(int value) => setState(() => selected = value);
+}
+
+class ComponentCatalogPage extends StatefulWidget {
+  const ComponentCatalogPage({super.key});
+
+  @override
+  State<ComponentCatalogPage> createState() => _ComponentCatalogPageState();
+}
+
+class _ComponentCatalogPageState extends State<ComponentCatalogPage> {
+  String query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = componentDocs
+        .where(
+          (item) => '${item.title} ${item.type} ${item.summary}'
+              .toLowerCase()
+              .contains(query.toLowerCase()),
+        )
+        .toList();
+    return CustomScrollView(
+      key: const PageStorageKey('components'),
+      slivers: [
+        SliverToBoxAdapter(
+          child: _Hero(
+            onQueryChanged: (value) => setState(() => query = value),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 48),
+          sliver: SliverToBoxAdapter(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1180),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = constraints.maxWidth >= 1000
+                        ? 3
+                        : constraints.maxWidth >= 650
+                        ? 2
+                        : 1;
+                    final width =
+                        (constraints.maxWidth - (columns - 1) * 16) / columns;
+                    return Wrap(
+                      spacing: 16,
+                      runSpacing: 16,
+                      children: [
+                        for (final item in filtered)
+                          SizedBox(
+                            width: width,
+                            child: ComponentDocCard(doc: item),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Hero extends StatelessWidget {
+  const _Hero({required this.onQueryChanged});
+  final ValueChanged<String> onQueryChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 44, 24, 32),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.primaryContainer,
+            theme.colorScheme.surface,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1180),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _Pill(
+                icon: Icons.widgets_outlined,
+                label: '14 built-in field types',
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Component explorer',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.2,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Preview every renderer, inspect its JSON schema, and copy a working definition into your app.',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: TextField(
+                  onChanged: onQueryChanged,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Search fields and capabilities',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ComponentDocCard extends StatefulWidget {
+  const ComponentDocCard({required this.doc, super.key});
+  final ComponentDoc doc;
+
+  @override
+  State<ComponentDocCard> createState() => _ComponentDocCardState();
+}
+
+class _ComponentDocCardState extends State<ComponentDocCard> {
+  bool expanded = false;
+  int uploadSequence = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => expanded = !expanded),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          widget.doc.icon,
+                          color: theme.colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.doc.title,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              'FormType.${widget.doc.constant}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    widget.doc.summary,
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Divider(color: theme.colorScheme.outlineVariant),
+                  const SizedBox(height: 10),
+                  Text('Live preview', style: theme.textTheme.labelLarge),
+                  const SizedBox(height: 12),
+                  SkyloomForm.fromJson(
+                    schema: widget.doc.schema,
+                    layout: SkyloomFormLayout.column,
+                    showSubmitButton: false,
+                    showErrorSummary: false,
+                    validationMode: SkyloomValidationMode.onBlur,
+                    fileUploadHandlers: widget.doc.type == FormType.file
+                        ? {
+                            'demoUpload': (request) async {
+                              uploadSequence++;
+                              return [
+                                SkyloomUploadedFile(
+                                  id: 'demo_$uploadSequence',
+                                  name: 'portfolio.pdf',
+                                  mimeType: 'application/pdf',
+                                  size: 248312,
+                                ),
+                              ];
+                            },
+                          }
+                        : const {},
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Text('Schema', style: theme.textTheme.labelLarge),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Copy schema',
+                        onPressed: copySchema,
+                        icon: const Icon(Icons.copy_outlined, size: 19),
+                      ),
+                    ],
+                  ),
+                  _CodeBlock(value: prettyJson(widget.doc.schema)),
+                  const SizedBox(height: 14),
+                  Text('Key properties', style: theme.textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.doc.properties,
+                    style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> copySchema() async {
+    await Clipboard.setData(ClipboardData(text: prettyJson(widget.doc.schema)));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('Schema copied'),
+      ),
+    );
+  }
+}
+
+class SchemaReferencePage extends StatelessWidget {
+  const SchemaReferencePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _DocsPage(
+      eyebrow: 'SCHEMA 1.0',
+      title: 'Schema API reference',
+      description:
+          'The JSON-compatible contract parsed by SchemaParser and rendered by SkyloomForm.',
+      children: const [
+        _ReferenceSection(
+          title: 'Form object',
+          description:
+              'Top-level definition for identity, fields, presentation, sections, and workflow steps.',
+          rows: [
+            ('id', 'String', 'Required', 'Stable form identifier.'),
+            (
+              'schemaVersion',
+              'String',
+              'Optional',
+              'Schema contract version; currently 1.0.',
+            ),
+            ('title', 'String', 'Optional', 'Human-readable form title.'),
+            ('description', 'String', 'Optional', 'Supporting description.'),
+            (
+              'fields',
+              'List<Field>',
+              'Required',
+              'Root field definitions with unique keys.',
+            ),
+            (
+              'uiSchema',
+              'Map',
+              'Optional',
+              'Renderer, order, responsive spans, and visual hints.',
+            ),
+            (
+              'sections',
+              'List<Section>',
+              'Optional',
+              'Ordered or collapsible field groups.',
+            ),
+            (
+              'steps',
+              'List<Step>',
+              'Optional',
+              'Ordered conditional workflow pages.',
+            ),
+            ('metadata', 'Map', 'Optional', 'Application-owned JSON metadata.'),
+          ],
+        ),
+        _ReferenceSection(
+          title: 'Field object',
+          description:
+              'Common properties accepted by fields. Type-specific cards document additional properties.',
+          rows: [
+            (
+              'key',
+              'String',
+              'Required*',
+              'Unique key and submitted-value path.',
+            ),
+            ('type', 'String', 'Required', 'Built-in or custom renderer type.'),
+            ('label', 'String', 'Optional', 'Visible field label.'),
+            ('description', 'String', 'Optional', 'Longer explanatory copy.'),
+            (
+              'helperText',
+              'String',
+              'Optional',
+              'Supporting text near the control.',
+            ),
+            ('placeholder', 'String', 'Optional', 'Empty-value prompt.'),
+            (
+              'defaultValue',
+              'JSON value',
+              'Optional',
+              'Initial value when no explicit value is supplied.',
+            ),
+            ('required', 'bool', 'Optional', 'Static required state.'),
+            ('disabled', 'bool', 'Optional', 'Static disabled state.'),
+            ('readOnly', 'bool', 'Optional', 'Static read-only state.'),
+            ('hidden', 'bool', 'Optional', 'Static hidden state.'),
+            (
+              'validation',
+              'Map',
+              'Optional',
+              'Built-in and named custom validation rules.',
+            ),
+          ],
+          footnote: '* Array item schemas do not require a key.',
+        ),
+        _ReferenceSection(
+          title: 'Validation rules',
+          description:
+              'Rules run through the controller and return structured field errors.',
+          rows: [
+            (
+              'required',
+              'bool',
+              'Presence',
+              'Rejects null, blank, false, or empty values.',
+            ),
+            (
+              'minLength / maxLength',
+              'int',
+              'Length',
+              'String or collection length bounds.',
+            ),
+            ('min / max', 'num', 'Numeric', 'Inclusive numeric bounds.'),
+            ('minDate / maxDate', 'ISO date', 'Date', 'Inclusive date bounds.'),
+            ('email / url', 'bool', 'Format', 'Common format validation.'),
+            (
+              'pattern / regex',
+              'String',
+              'Format',
+              'Pattern-based validation.',
+            ),
+            (
+              'sameAs / notSameAs',
+              'field path',
+              'Cross-field',
+              'Equality comparisons.',
+            ),
+            (
+              'greaterThan / lessThan',
+              'field path',
+              'Cross-field',
+              'Numeric or ISO-date comparison.',
+            ),
+            (
+              'custom',
+              'String/List',
+              'Extension',
+              'Named application validators.',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class FeatureGuidesPage extends StatelessWidget {
+  const FeatureGuidesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _DocsPage(
+      eyebrow: 'RECIPES',
+      title: 'Feature guides',
+      description:
+          'Production patterns for responsive forms, conditions, remote data, and workflows.',
+      children: const [
+        _GuideCard(
+          title: 'Responsive layout',
+          icon: Icons.devices_outlined,
+          body:
+              'Use twelve-column spans in uiSchema. Missing spans default to 12, so every field remains usable on every screen.',
+          code:
+              "'uiSchema': {\n  'firstName': {\n    'layout': {'mobile': 12, 'tablet': 6, 'desktop': 6}\n  }\n}",
+        ),
+        _GuideCard(
+          title: 'Conditional state',
+          icon: Icons.alt_route,
+          body:
+              'Conditions can drive visibility, required, enabled, disabled, and read-only state using field paths and nested groups.',
+          code:
+              "'visibleWhen': {\n  'field': 'accountType',\n  'equals': 'business'\n}",
+        ),
+        _GuideCard(
+          title: 'Dependencies and remote options',
+          icon: Icons.sync_alt,
+          body:
+              'Declare dependency edges in JSON and register application-owned handlers in Dart. Network code never enters the schema.',
+          code:
+              "'dependsOn': ['country'],\n'dataSource': {'handler': 'states'},\n'dependencyConfig': {\n  'clearOnChange': true,\n  'reloadDataOnChange': true\n}",
+        ),
+        _GuideCard(
+          title: 'Multi-step workflows',
+          icon: Icons.route_outlined,
+          body:
+              'Assign each root field to one ordered step. Next validates the current step; steps may also be conditional.',
+          code:
+              "'steps': [\n  {'id': 'profile', 'title': 'Profile', 'fields': ['name']},\n  {'id': 'contact', 'title': 'Contact', 'fields': ['email']}\n]",
+        ),
+        _GuideCard(
+          title: 'Controller integration',
+          icon: Icons.gamepad_outlined,
+          body:
+              'Use SkyloomFormController for programmatic values, validation, step navigation, server errors, reset, and persistence.',
+          code:
+              "final controller = SkyloomFormController(schema: schema);\ncontroller.setValue('email', 'dev@example.com');\nawait controller.nextStep();\nfinal values = controller.values;",
+        ),
+      ],
+    );
+  }
+}
+
+class _DocsPage extends StatelessWidget {
+  const _DocsPage({
+    required this.eyebrow,
+    required this.title,
+    required this.description,
+    required this.children,
+  });
+  final String eyebrow;
+  final String title;
+  final String description;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListView(
+      key: PageStorageKey(title),
+      padding: const EdgeInsets.fromLTRB(24, 44, 24, 60),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1040),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  eyebrow,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  description,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 30),
+                ...children.map(
+                  (child) => Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: child,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReferenceSection extends StatelessWidget {
+  const _ReferenceSection({
+    required this.title,
+    required this.description,
+    required this.rows,
+    this.footnote,
+  });
+  final String title;
+  final String description;
+  final List<(String, String, String, String)> rows;
+  final String? footnote;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+        childrenPadding: const EdgeInsets.fromLTRB(22, 0, 22, 22),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Text(description),
+        ),
+        children: [
+          const Divider(),
+          for (final row in rows) _PropertyRow(row: row),
+          if (footnote != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(footnote!, style: theme.textTheme.bodySmall),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PropertyRow extends StatelessWidget {
+  const _PropertyRow({required this.row});
+  final (String, String, String, String) row;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 650) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row.$1,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${row.$2} · ${row.$3}',
+                  style: TextStyle(color: theme.colorScheme.primary),
+                ),
+                const SizedBox(height: 4),
+                Text(row.$4),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 2,
+                child: Text(
+                  row.$1,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Expanded(flex: 2, child: Text(row.$2)),
+              Expanded(flex: 2, child: Text(row.$3)),
+              Expanded(flex: 5, child: Text(row.$4)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _GuideCard extends StatelessWidget {
+  const _GuideCard({
+    required this.title,
+    required this.icon,
+    required this.body,
+    required this.code,
+  });
+  final String title;
+  final IconData icon;
+  final String body;
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ExpansionTile(
+        key: PageStorageKey('guide-$title'),
+        leading: CircleAvatar(
+          backgroundColor: theme.colorScheme.secondaryContainer,
+          child: Icon(icon),
+        ),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Text(body),
+        ),
+        children: [
+          const SizedBox(height: 10),
+          _CodeBlock(value: code),
+        ],
+      ),
+    );
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({required this.value});
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: SelectableText(
+        key: PageStorageKey('code-$value'),
+        value,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          height: 1.45,
+          color: colors.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _Brand extends StatelessWidget {
+  const _Brand({this.showName = false});
+  final bool showName;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(Icons.hub_outlined, color: Colors.white, size: 21),
+        ),
+        if (showName) ...[
+          const SizedBox(width: 10),
+          Text(
+            'Skyloom',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _VersionBadge extends StatelessWidget {
+  const _VersionBadge();
+  @override
+  Widget build(BuildContext context) =>
+      const _Pill(icon: Icons.code, label: 'Schema 1.0');
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      decoration: BoxDecoration(
+        color: colors.secondaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: colors.onSecondaryContainer),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.onSecondaryContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String prettyJson(Object? value) =>
+    const JsonEncoder.withIndent('  ').convert(value);
+
+Map<String, Object?> formFor(
+  Map<String, Object?> field, {
+  Map<String, Object?> ui = const {},
+}) => {
+  'id': 'preview_${field['key']}',
+  'fields': [field],
+  if (ui.isNotEmpty) 'uiSchema': {field['key'] as String: ui},
+};
+
+class ComponentDoc {
+  const ComponentDoc({
+    required this.title,
+    required this.type,
+    required this.constant,
+    required this.summary,
+    required this.properties,
+    required this.icon,
+    required this.schema,
+  });
+  final String title;
+  final String type;
+  final String constant;
+  final String summary;
+  final String properties;
+  final IconData icon;
+  final Map<String, Object?> schema;
+}
+
+final componentDocs = <ComponentDoc>[
+  ComponentDoc(
+    title: 'Text',
+    type: FormType.text,
+    constant: 'text',
+    icon: Icons.short_text,
+    summary: 'Single-line text input for names, labels, and general strings.',
+    properties:
+        'placeholder · helperText · defaultValue · minLength · maxLength · pattern · custom',
+    schema: formFor({
       'key': 'name',
       'type': FormType.text,
       'label': 'Full name',
+      'placeholder': 'Ada Lovelace',
       'validation': {'required': true, 'minLength': 2},
-    },
-    {
+    }),
+  ),
+  ComponentDoc(
+    title: 'Email',
+    type: FormType.email,
+    constant: 'email',
+    icon: Icons.alternate_email,
+    summary:
+        'Email-optimized keyboard and autofill with optional format validation.',
+    properties: 'placeholder · helperText · email · asyncValidation · custom',
+    schema: formFor({
       'key': 'email',
       'type': FormType.email,
       'label': 'Email address',
+      'placeholder': 'ada@example.com',
       'validation': {'required': true, 'email': true},
-      'asyncValidation': {
-        'handler': 'emailAvailable',
-        'debounceMilliseconds': 350,
-      },
-    },
-    {
-      'key': 'age',
+    }),
+  ),
+  ComponentDoc(
+    title: 'Password',
+    type: FormType.password,
+    constant: 'password',
+    icon: Icons.password,
+    summary: 'Obscured text input for credentials and sensitive strings.',
+    properties:
+        'placeholder · helperText · minLength · maxLength · pattern · custom',
+    schema: formFor({
+      'key': 'password',
+      'type': FormType.password,
+      'label': 'Password',
+      'helperText': 'At least 8 characters',
+      'validation': {'required': true, 'minLength': 8},
+    }),
+  ),
+  ComponentDoc(
+    title: 'Number',
+    type: FormType.number,
+    constant: 'number',
+    icon: Icons.numbers,
+    summary: 'Numeric input that emits JSON-compatible numeric values.',
+    properties: 'defaultValue · min · max · greaterThan · lessThan · custom',
+    schema: formFor({
+      'key': 'experience',
       'type': FormType.number,
-      'label': 'Age',
-      'validation': {'min': 18, 'max': 100},
-    },
-    {
+      'label': 'Years of experience',
+      'validation': {'min': 0, 'max': 60},
+    }),
+  ),
+  ComponentDoc(
+    title: 'Textarea',
+    type: FormType.textarea,
+    constant: 'textarea',
+    icon: Icons.notes,
+    summary: 'Multi-line input for descriptions, comments, and longer content.',
+    properties: 'placeholder · helperText · minLength · maxLength · custom',
+    schema: formFor({
+      'key': 'bio',
+      'type': FormType.textarea,
+      'label': 'Biography',
+      'placeholder': 'Tell us about yourself…',
+      'validation': {'maxLength': 240},
+    }),
+  ),
+  ComponentDoc(
+    title: 'Checkbox',
+    type: FormType.checkbox,
+    constant: 'checkbox',
+    icon: Icons.check_box_outlined,
+    summary: 'Boolean checkbox suited to consent and independent options.',
+    properties: 'defaultValue · required · disabled · readOnly · conditions',
+    schema: formFor({
+      'key': 'terms',
+      'type': FormType.checkbox,
+      'label': 'I agree to the terms',
+      'validation': {'required': true},
+    }),
+  ),
+  ComponentDoc(
+    title: 'Switch',
+    type: FormType.switchField,
+    constant: 'switchField',
+    icon: Icons.toggle_on_outlined,
+    summary: 'Boolean switch for settings that take effect immediately.',
+    properties:
+        'defaultValue · disabled · readOnly · enabledWhen · disabledWhen',
+    schema: formFor({
+      'key': 'updates',
+      'type': FormType.switchField,
+      'label': 'Product updates',
+      'defaultValue': true,
+    }),
+  ),
+  ComponentDoc(
+    title: 'Radio',
+    type: FormType.radio,
+    constant: 'radio',
+    icon: Icons.radio_button_checked,
+    summary: 'Single selection from a small, always-visible option set.',
+    properties:
+        'options · dataSource · defaultValue · radioDirection · required',
+    schema: formFor(
+      {
+        'key': 'workMode',
+        'type': FormType.radio,
+        'label': 'Work mode',
+        'options': [
+          {'label': 'Remote', 'value': 'remote'},
+          {'label': 'Hybrid', 'value': 'hybrid'},
+        ],
+      },
+      ui: {
+        'visualHints': {FormUiHint.radioDirection: FormUiDirection.row},
+      },
+    ),
+  ),
+  ComponentDoc(
+    title: 'Select',
+    type: FormType.select,
+    constant: 'select',
+    icon: Icons.arrow_drop_down_circle_outlined,
+    summary:
+        'Compact single selection with static or asynchronously loaded options.',
+    properties:
+        'options · dataSource · dependsOn · dependencyConfig · required',
+    schema: formFor({
       'key': 'role',
       'type': FormType.select,
       'label': 'Role',
       'options': [
         {'label': 'Developer', 'value': 'developer'},
-        {'label': 'Quality Analyst', 'value': 'qa'},
-        {'label': 'Manager', 'value': 'manager'},
+        {'label': 'Designer', 'value': 'designer'},
       ],
+    }),
+  ),
+  ComponentDoc(
+    title: 'Date',
+    type: FormType.date,
+    constant: 'date',
+    icon: Icons.calendar_month_outlined,
+    summary: 'Material date picker that stores an ISO-compatible date value.',
+    properties: 'defaultValue · minDate · maxDate · greaterThan · lessThan',
+    schema: formFor({
+      'key': 'startDate',
+      'type': FormType.date,
+      'label': 'Start date',
       'validation': {'required': true},
-    },
-    {
-      'key': 'contactPreference',
-      'type': FormType.radio,
-      'label': 'Preferred contact method',
-      'options': [
-        {'label': 'Email', 'value': 'email'},
-        {'label': 'Phone', 'value': 'phone'},
-      ],
-    },
-    {
-      'key': 'notificationsEnabled',
-      'type': FormType.switchField,
-      'label': 'Enable notifications',
-      'defaultValue': true,
-    },
-    {
-      'key': 'acceptedTerms',
-      'type': FormType.checkbox,
-      'label': 'Accept the terms',
-      'validation': {'required': true},
-    },
-    {'key': 'dateOfBirth', 'type': FormType.date, 'label': 'Date of birth'},
-    {
-      'key': 'skills',
-      'type': FormType.chip,
-      'label': 'Skills',
-      'options': [
-        {'label': 'Flutter', 'value': 'flutter'},
-        {'label': 'Dart', 'value': 'dart'},
-        {'label': 'Testing', 'value': 'testing'},
-        {'label': 'Design systems', 'value': 'design-systems'},
-      ],
-    },
-    {
+    }),
+  ),
+  ComponentDoc(
+    title: 'File',
+    type: FormType.file,
+    constant: 'file',
+    icon: Icons.upload_file_outlined,
+    summary:
+        'Application-owned upload flow with typed metadata, progress, retry, and removal.',
+    properties:
+        'upload.handler · accept · maxBytes · multiple · minFiles · maxFiles',
+    schema: formFor({
+      'key': 'resume',
+      'type': FormType.file,
+      'label': 'Resume',
+      'helperText': 'PDF, up to 5 MB',
+      'upload': {
+        'handler': 'demoUpload',
+        'accept': ['application/pdf'],
+        'maxBytes': 5000000,
+      },
+    }),
+  ),
+  ComponentDoc(
+    title: 'Chip',
+    type: FormType.chip,
+    constant: 'chip',
+    icon: Icons.sell_outlined,
+    summary:
+        'ChoiceChip for one value or FilterChip for a JSON list of values.',
+    properties: 'options · dataSource · visualHints.multiSelect · defaultValue',
+    schema: formFor(
+      {
+        'key': 'skills',
+        'type': FormType.chip,
+        'label': 'Skills',
+        'options': [
+          {'label': 'Flutter', 'value': 'flutter'},
+          {'label': 'Dart', 'value': 'dart'},
+          {'label': 'Testing', 'value': 'testing'},
+        ],
+      },
+      ui: {
+        'visualHints': {FormUiHint.multiSelect: true},
+      },
+    ),
+  ),
+  ComponentDoc(
+    title: 'Object',
+    type: FormType.object,
+    constant: 'object',
+    icon: Icons.account_tree_outlined,
+    summary: 'Recursive field group that preserves a nested JSON object.',
+    properties:
+        'fields · label · description · nested validation and conditions',
+    schema: formFor({
       'key': 'address',
       'type': FormType.object,
       'label': 'Address',
       'fields': [
-        {
-          'key': 'country',
-          'type': FormType.select,
-          'label': 'Country',
-          'options': [
-            {'label': 'India', 'value': 'IN'},
-            {'label': 'United States', 'value': 'US'},
-          ],
-        },
-        {
-          'key': 'state',
-          'type': FormType.select,
-          'label': 'State',
-          'dependsOn': ['country'],
-          'dataSource': {'handler': 'states'},
-          'dependencyConfig': {
-            'clearOnChange': true,
-            'reloadDataOnChange': true,
-          },
-        },
         {'key': 'city', 'type': FormType.text, 'label': 'City'},
+        {'key': 'country', 'type': FormType.text, 'label': 'Country'},
       ],
-    },
-    {
-      'key': 'emergencyContacts',
+    }),
+  ),
+  ComponentDoc(
+    title: 'Array',
+    type: FormType.array,
+    constant: 'array',
+    icon: Icons.view_list_outlined,
+    summary:
+        'Repeatable primitive, object, or nested-array items with built-in controls.',
+    properties:
+        'items · minItems · maxItems · defaultItem · add · remove · duplicate · reorder',
+    schema: formFor({
+      'key': 'contacts',
       'type': FormType.array,
       'label': 'Emergency contacts',
       'minItems': 1,
@@ -111,214 +1204,10 @@ const employeeSchema = <String, Object?>{
       'items': {
         'type': FormType.object,
         'fields': [
-          {'key': 'name', 'type': FormType.text, 'label': 'Contact name'},
-          {'key': 'phone', 'type': FormType.text, 'label': 'Phone number'},
+          {'key': 'name', 'type': FormType.text, 'label': 'Name'},
+          {'key': 'phone', 'type': FormType.text, 'label': 'Phone'},
         ],
       },
-    },
-    {'key': 'notes', 'type': FormType.textarea, 'label': 'Notes'},
-  ],
-  'uiSchema': {
-    'name': {
-      'layout': {'tablet': 6, 'desktop': 6},
-      'order': 1,
-    },
-    'email': {
-      'layout': {'tablet': 6, 'desktop': 6},
-      'order': 2,
-    },
-    'age': {
-      'layout': {'tablet': 4, 'desktop': 4},
-      'order': 3,
-    },
-    'role': {
-      'layout': {'tablet': 8, 'desktop': 4},
-      'order': 4,
-    },
-    'dateOfBirth': {
-      'layout': {'tablet': 4, 'desktop': 4},
-      'order': 5,
-    },
-    'contactPreference': {
-      'layout': {'tablet': 6, 'desktop': 4},
-      'order': 1,
-      'visualHints': {FormUiHint.radioDirection: FormUiDirection.row},
-    },
-    'notificationsEnabled': {
-      'layout': {'tablet': 6, 'desktop': 4},
-      'order': 2,
-    },
-    'acceptedTerms': {
-      'layout': {'tablet': 6, 'desktop': 4},
-      'order': 3,
-    },
-    'notes': {
-      'layout': {'desktop': 12},
-      'order': 4,
-    },
-    'skills': {
-      'layout': {'desktop': 12},
-      'order': 6,
-      'visualHints': {FormUiHint.multiSelect: true},
-    },
-  },
-  'sections': [
-    {
-      'id': 'identity',
-      'title': 'Employee details',
-      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth', 'skills'],
-      'order': 1,
-    },
-    {
-      'id': 'preferences',
-      'title': 'Preferences',
-      'fields': [
-        'contactPreference',
-        'notificationsEnabled',
-        'acceptedTerms',
-        'notes',
-      ],
-      'collapsible': true,
-      'order': 2,
-    },
-    {
-      'id': 'contact',
-      'title': 'Address and emergency contacts',
-      'fields': ['address', 'emergencyContacts'],
-      'collapsible': true,
-      'order': 3,
-    },
-  ],
-  'steps': [
-    {
-      'id': 'identity_step',
-      'title': 'Employee details',
-      'description': 'Add the employee identity and role information.',
-      'fields': ['name', 'email', 'age', 'role', 'dateOfBirth', 'skills'],
-      'order': 1,
-    },
-    {
-      'id': 'preferences_step',
-      'title': 'Preferences',
-      'description': 'Configure communication and onboarding preferences.',
-      'fields': [
-        'contactPreference',
-        'notificationsEnabled',
-        'acceptedTerms',
-        'notes',
-      ],
-      'order': 2,
-    },
-    {
-      'id': 'contact_step',
-      'title': 'Contact details',
-      'description': 'Add an address and emergency contacts.',
-      'fields': ['address', 'emergencyContacts'],
-      'order': 3,
-    },
-  ],
-};
-
-void main() => runApp(const SkyloomExampleApp());
-
-class SkyloomExampleApp extends StatelessWidget {
-  const SkyloomExampleApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Skyloom Schema Example',
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-      home: const EmployeeFormPage(),
-    );
-  }
-}
-
-class EmployeeFormPage extends StatefulWidget {
-  const EmployeeFormPage({super.key});
-
-  @override
-  State<EmployeeFormPage> createState() => _EmployeeFormPageState();
-}
-
-class _EmployeeFormPageState extends State<EmployeeFormPage> {
-  Map<String, Object?>? _submittedValues;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Employee Registration')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            SkyloomForm.fromJson(
-              schema: employeeSchema,
-              layout: SkyloomFormLayout.column,
-              allowStepNavigation: true,
-              padding: const EdgeInsets.all(4),
-              inputDecorationTheme: const InputDecorationTheme(
-                border: OutlineInputBorder(),
-              ),
-              initialValues: const {
-                'address': {'country': 'IN', 'city': 'Chennai'},
-              },
-              dataSources: {
-                'states': (request) async {
-                  await Future<void>.delayed(const Duration(milliseconds: 250));
-                  final country = request.dependencyValues['country'];
-                  return country == 'US'
-                      ? [
-                          {'label': 'California', 'value': 'CA'},
-                          {'label': 'New York', 'value': 'NY'},
-                        ]
-                      : [
-                          {'label': 'Tamil Nadu', 'value': 'TN'},
-                          {'label': 'Karnataka', 'value': 'KA'},
-                        ];
-                },
-              },
-              asyncValidators: {
-                'emailAvailable': (value, validationContext) async {
-                  await Future<void>.delayed(const Duration(milliseconds: 350));
-                  return value == 'used@example.com'
-                      ? 'This email address is already registered.'
-                      : null;
-                },
-              },
-              onDependencyChanged: (change) {
-                if (change.configuration.reloadDataOnChange) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Reload options for ${change.dependentKey}',
-                      ),
-                    ),
-                  );
-                }
-              },
-              onSubmit: (values) {
-                setState(() => _submittedValues = values);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('Form submitted')));
-              },
-            ),
-            if (_submittedValues != null) ...[
-              const SizedBox(height: 24),
-              Text(
-                'Submitted JSON',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              SelectableText(
-                const JsonEncoder.withIndent(' ').convert(_submittedValues),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
+    }),
+  ),
+];

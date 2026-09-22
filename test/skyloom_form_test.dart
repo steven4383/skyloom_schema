@@ -2,6 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skyloom_schema/skyloom_schema.dart';
 
+final class _LocalizedMessages extends SkyloomMessages {
+  const _LocalizedMessages();
+
+  @override
+  String get submit => 'Send form';
+
+  @override
+  String validationMessage(
+    String code, {
+    required String label,
+    Map<String, Object?> arguments = const {},
+  }) => 'localized:$code:$label';
+}
+
 void main() {
   const schema = <String, Object?>{
     'id': 'login',
@@ -47,6 +61,27 @@ void main() {
       'email': 'steven@example.com',
       'rememberMe': true,
     });
+  });
+
+  testWidgets('localizes validation and default Material action text', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: schema,
+            messages: const _LocalizedMessages(),
+            onSubmit: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.widgetWithText(FilledButton, 'Send form'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Send form'));
+    await tester.pump();
+    expect(find.text('localized:required:Email'), findsWidgets);
   });
 
   testWidgets('shows validation errors and blocks invalid submission', (
@@ -231,6 +266,12 @@ void main() {
                     ],
                   },
                   {'key': 'date', 'type': 'date', 'label': 'Date'},
+                  {
+                    'key': 'file',
+                    'type': 'file',
+                    'label': 'File',
+                    'upload': {'handler': 'files'},
+                  },
                 ],
               },
             ),
@@ -245,6 +286,58 @@ void main() {
     expect(find.text('Radio'), findsOneWidget);
     expect(find.text('Select'), findsOneWidget);
     expect(find.text('Date'), findsOneWidget);
+    expect(find.text('File'), findsOneWidget);
+  });
+
+  testWidgets('uploads and stores a JSON-safe file reference', (tester) async {
+    Map<String, Object?>? changedValues;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SkyloomForm.fromJson(
+            schema: const {
+              'id': 'file_upload',
+              'fields': [
+                {
+                  'key': 'resume',
+                  'type': FormType.file,
+                  'label': 'Resume',
+                  'upload': {
+                    'handler': 'resumeUpload',
+                    'accept': ['application/pdf'],
+                    'maxBytes': 5000000,
+                  },
+                },
+              ],
+            },
+            fileUploadHandlers: {
+              'resumeUpload': (request) => [
+                SkyloomUploadedFile(
+                  id: 'resume-1',
+                  name: 'resume.pdf',
+                  mimeType: 'application/pdf',
+                  size: 1200,
+                  url: 'https://example.com/resume.pdf',
+                ),
+              ],
+            },
+            onChanged: (values) => changedValues = values,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Choose file'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('resume.pdf'), findsOneWidget);
+    expect(changedValues?['resume'], {
+      'id': 'resume-1',
+      'name': 'resume.pdf',
+      'url': 'https://example.com/resume.pdf',
+      'mimeType': 'application/pdf',
+      'size': 1200,
+    });
   });
 
   testWidgets('supports outlined inputs and scrolls large forms', (

@@ -1,6 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skyloom_schema/skyloom_schema.dart';
 
+final class _TestMessages extends SkyloomMessages {
+  const _TestMessages();
+
+  @override
+  String validationMessage(
+    String code, {
+    required String label,
+    Map<String, Object?> arguments = const {},
+  }) => 'localized:$code:$label';
+}
+
 void main() {
   FieldSchema field(Map<String, Object?> validation, {String type = 'text'}) {
     return const SchemaParser()
@@ -145,6 +156,75 @@ void main() {
     expect(
       engine.validateField(date, 'not-a-date', values),
       'Value must be a valid date.',
+    );
+  });
+
+  test('returns structured localized validation errors', () {
+    final required = field({'required': true});
+    const localizedEngine = ValidationEngine(messages: _TestMessages());
+
+    final error = localizedEngine.validateFieldError(required, null, values);
+
+    expect(error?.code, SkyloomValidationCode.required);
+    expect(error?.message, 'localized:required:Value');
+    expect(error?.arguments, isEmpty);
+  });
+
+  test('validates JSON-safe uploaded-file values and limits', () {
+    final uploadField = const SchemaParser()
+        .parse({
+          'id': 'upload_validation',
+          'fields': [
+            {
+              'key': 'documents',
+              'type': FormType.file,
+              'upload': {
+                'handler': 'documents',
+                'multiple': true,
+                'maxFiles': 2,
+                'maxBytes': 100,
+                'accept': ['application/pdf', 'image/*', '.docx'],
+              },
+            },
+          ],
+        })
+        .fields
+        .single;
+    final validFile = SkyloomUploadedFile(
+      id: 'one',
+      name: 'one.pdf',
+      mimeType: 'application/pdf',
+      size: 80,
+    ).toJson();
+    final largeFile = SkyloomUploadedFile(
+      id: 'large',
+      name: 'large.pdf',
+      mimeType: 'application/pdf',
+      size: 101,
+    ).toJson();
+
+    expect(engine.validateField(uploadField, [validFile], values), isNull);
+    expect(
+      engine.validateFieldError(uploadField, [largeFile], values)?.code,
+      SkyloomValidationCode.uploadMaxBytes,
+    );
+    expect(
+      engine.validateFieldError(uploadField, [
+        validFile,
+        validFile,
+        validFile,
+      ], values)?.code,
+      SkyloomValidationCode.uploadMaxFiles,
+    );
+    final invalidType = SkyloomUploadedFile(
+      id: 'text',
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 20,
+    ).toJson();
+    expect(
+      engine.validateFieldError(uploadField, [invalidType], values)?.code,
+      SkyloomValidationCode.uploadInvalidType,
     );
   });
 

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../controller/field_controller.dart';
 import '../controller/form_controller.dart';
+import '../engine/skyloom_messages.dart';
 import '../schema/field_schema.dart';
 
 typedef SkyloomChildFieldBuilder =
@@ -16,6 +17,7 @@ final class SkyloomRendererContext {
     required this.formController,
     required this.buildChild,
     required this.validateOnChange,
+    this.messages = const EnglishSkyloomMessages(),
     this.revalidateInvalidOnChange = false,
     required this.validateOnBlur,
   });
@@ -26,6 +28,7 @@ final class SkyloomRendererContext {
   final SkyloomFormController formController;
   final SkyloomChildFieldBuilder buildChild;
   final bool validateOnChange;
+  final SkyloomMessages messages;
 
   /// Revalidates a field on edit only after it already has an error.
   ///

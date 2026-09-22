@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../engine/validation_error.dart';
 import '../schema/field_schema.dart';
 import '../utils/json_value_utils.dart';
 
@@ -21,7 +22,7 @@ final class SkyloomFieldController extends ChangeNotifier {
   final String _key;
   Object? _initialValue;
   Object? _value;
-  String? _error;
+  SkyloomValidationError? _validationError;
   bool _touched = false;
   bool _focused = false;
   bool _loading = false;
@@ -33,7 +34,8 @@ final class SkyloomFieldController extends ChangeNotifier {
   String get key => _key;
   Object? get value => _value;
   Object? get initialValue => _initialValue;
-  String? get error => _error;
+  String? get error => _validationError?.message;
+  SkyloomValidationError? get validationError => _validationError;
   bool get dirty => !_deepEquals(_value, _initialValue);
   bool get pristine => !dirty;
   bool get touched => _touched;
@@ -46,7 +48,7 @@ final class SkyloomFieldController extends ChangeNotifier {
   bool get disabled => !enabled;
   bool get readOnly => _readOnly;
   bool get required => _required;
-  bool get valid => _error == null;
+  bool get valid => _validationError == null;
   bool get invalid => !valid;
 
   /// Updates the field value and optionally marks it as touched.
@@ -109,9 +111,29 @@ final class SkyloomFieldController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setError(String? error) {
-    if (_error == error) return;
-    _error = error;
+  void setError(
+    String? error, {
+    String code = SkyloomValidationCode.custom,
+    Map<String, Object?> arguments = const {},
+  }) {
+    setValidationError(
+      error == null
+          ? null
+          : SkyloomValidationError(
+              code: code,
+              message: error,
+              arguments: arguments,
+            ),
+    );
+  }
+
+  void setValidationError(SkyloomValidationError? error) {
+    if (_validationError?.code == error?.code &&
+        _validationError?.message == error?.message &&
+        _deepEquals(_validationError?.arguments, error?.arguments)) {
+      return;
+    }
+    _validationError = error;
     notifyListeners();
   }
 
@@ -123,14 +145,14 @@ final class SkyloomFieldController extends ChangeNotifier {
     final changed =
         !_deepEquals(_initialValue, nextValue) ||
         (updateValue && !_deepEquals(_value, nextValue)) ||
-        _error != null ||
+        _validationError != null ||
         _touched ||
         _focused;
     _initialValue = nextValue;
     if (updateValue) {
       _value = nextValue;
     }
-    _error = null;
+    _validationError = null;
     _touched = false;
     _focused = false;
     if (changed) notifyListeners();
@@ -139,12 +161,12 @@ final class SkyloomFieldController extends ChangeNotifier {
   void reset() {
     final changed =
         !_deepEquals(_value, _initialValue) ||
-        _error != null ||
+        _validationError != null ||
         _touched ||
         _focused ||
         _loading;
     _value = _initialValue;
-    _error = null;
+    _validationError = null;
     _touched = false;
     _focused = false;
     _loading = false;
@@ -153,9 +175,13 @@ final class SkyloomFieldController extends ChangeNotifier {
 
   void clear() {
     final changed =
-        _value != null || _error != null || _touched || _focused || _loading;
+        _value != null ||
+        _validationError != null ||
+        _touched ||
+        _focused ||
+        _loading;
     _value = null;
-    _error = null;
+    _validationError = null;
     _touched = false;
     _focused = false;
     _loading = false;

@@ -16,6 +16,7 @@ abstract final class FormType {
   static const String switchField = 'switch';
   static const String select = 'select';
   static const String date = 'date';
+  static const String file = 'file';
   static const String chip = 'chip';
   static const String object = 'object';
   static const String array = 'array';
@@ -31,6 +32,9 @@ abstract final class FormType {
     switchField,
     select,
     date,
+    file,
     chip,
   };
+
+  static const Set<String> builtInTypes = {...basicTypes, object, array};
 }

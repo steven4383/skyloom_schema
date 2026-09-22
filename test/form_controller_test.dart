@@ -87,6 +87,16 @@ void main() {
     expect(controller.validate(), isFalse);
     expect(controller.errors['email'], 'We need an email.');
     expect(controller.errors['acceptedTerms'], 'acceptedTerms is required.');
+    expect(
+      controller.field('email').validationError?.code,
+      SkyloomValidationCode.required,
+    );
+    expect(
+      controller.errorEntries
+          .firstWhere((error) => error.fieldKey == 'email')
+          .code,
+      SkyloomValidationCode.required,
+    );
 
     controller
       ..setValue('email', 'not-an-email')
@@ -668,6 +678,10 @@ void main() {
     );
 
     expect(result.appliedFields, ['email']);
+    expect(
+      controller.field('email').validationError?.code,
+      SkyloomValidationCode.server,
+    );
     expect(result.unknownFields, ['legacyId']);
     expect(
       controller.errors['email'],

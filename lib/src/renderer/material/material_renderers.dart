@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../engine/file_upload.dart';
+import '../../engine/skyloom_messages.dart';
+import '../../engine/validation_error.dart';
 import '../../registry/renderer_registry.dart';
 import '../../schema/field_schema.dart';
 import '../../schema/form_type.dart';
@@ -30,6 +33,7 @@ final class MaterialSkyloomRenderers {
       FormType.radio: const MaterialRadioFieldRenderer(),
       FormType.select: const MaterialSelectFieldRenderer(),
       FormType.date: const MaterialDateFieldRenderer(),
+      FormType.file: const MaterialFileFieldRenderer(),
       FormType.chip: const MaterialChipFieldRenderer(),
       FormType.object: const MaterialObjectFieldRenderer(),
       FormType.array: const MaterialArrayFieldRenderer(),
@@ -145,7 +149,7 @@ final class _SkyloomArrayField extends StatelessWidget {
                         )
                       : null,
                   icon: const Icon(Icons.add),
-                  label: const Text('Add'),
+                  label: Text(rendererContext.messages.add),
                 ),
               ],
             ),
@@ -155,7 +159,7 @@ final class _SkyloomArrayField extends StatelessWidget {
               const SizedBox(height: 16),
               Center(
                 child: Text(
-                  'No items yet.',
+                  rendererContext.messages.noItems,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -195,6 +199,7 @@ final class _SkyloomArrayField extends StatelessWidget {
                         index,
                         index + 1,
                       ),
+                messages: rendererContext.messages,
               ),
             ],
             if (rendererContext.error != null) ...[
@@ -228,6 +233,7 @@ final class _ArrayItemCard extends StatelessWidget {
     required this.onDuplicate,
     required this.onMoveUp,
     required this.onMoveDown,
+    required this.messages,
     super.key,
   });
 
@@ -243,6 +249,7 @@ final class _ArrayItemCard extends StatelessWidget {
   final VoidCallback onDuplicate;
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
+  final SkyloomMessages messages;
 
   @override
   Widget build(BuildContext context) {
@@ -271,24 +278,24 @@ final class _ArrayItemCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    schema.label ?? 'Item ${index + 1}',
+                    schema.label ?? messages.item(index + 1),
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
                 IconButton.filledTonal(
-                  tooltip: 'Move item up',
+                  tooltip: messages.moveItemUp,
                   onPressed: enabled ? onMoveUp : null,
                   icon: const Icon(Icons.arrow_upward, size: 18),
                 ),
                 const SizedBox(width: 4),
                 IconButton.filledTonal(
-                  tooltip: 'Move item down',
+                  tooltip: messages.moveItemDown,
                   onPressed: enabled ? onMoveDown : null,
                   icon: const Icon(Icons.arrow_downward, size: 18),
                 ),
                 const SizedBox(width: 4),
                 PopupMenuButton<_ArrayItemAction>(
-                  tooltip: 'More item actions',
+                  tooltip: messages.moreItemActions,
                   enabled: enabled,
                   onSelected: (action) {
                     switch (action) {
@@ -302,19 +309,19 @@ final class _ArrayItemCard extends StatelessWidget {
                     PopupMenuItem(
                       value: _ArrayItemAction.duplicate,
                       enabled: canDuplicate,
-                      child: const ListTile(
+                      child: ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.copy_outlined),
-                        title: Text('Duplicate'),
+                        leading: const Icon(Icons.copy_outlined),
+                        title: Text(messages.duplicate),
                       ),
                     ),
                     PopupMenuItem(
                       value: _ArrayItemAction.remove,
                       enabled: canRemove,
-                      child: const ListTile(
+                      child: ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.delete_outline),
-                        title: Text('Remove'),
+                        leading: const Icon(Icons.delete_outline),
+                        title: Text(messages.remove),
                       ),
                     ),
                   ],
@@ -325,7 +332,7 @@ final class _ArrayItemCard extends StatelessWidget {
             if (count == 1) ...[
               const SizedBox(height: 6),
               Text(
-                'Add another item to enable reordering.',
+                messages.addAnotherItemToReorder,
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
@@ -339,6 +346,7 @@ final class _ArrayItemCard extends StatelessWidget {
               value: value,
               enabled: enabled,
               path: 'item-$index',
+              messages: messages,
               onChanged: onChanged,
             ),
           ],
@@ -357,6 +365,7 @@ final class _ArrayItemEditor extends StatelessWidget {
     required this.enabled,
     required this.path,
     required this.onChanged,
+    required this.messages,
   });
 
   final FieldSchema schema;
@@ -364,6 +373,7 @@ final class _ArrayItemEditor extends StatelessWidget {
   final bool enabled;
   final String path;
   final ValueChanged<Object?> onChanged;
+  final SkyloomMessages messages;
 
   @override
   Widget build(BuildContext context) {
@@ -382,6 +392,7 @@ final class _ArrayItemEditor extends StatelessWidget {
               enabled:
                   enabled && !fields[index].disabled && !fields[index].readOnly,
               path: '$path.${fields[index].key}',
+              messages: messages,
               onChanged: (childValue) {
                 final next = thawJsonValue(object)! as Map<String, Object?>;
                 PathUtils.setValue(next, fields[index].key, childValue);
@@ -414,6 +425,7 @@ final class _ArrayItemEditor extends StatelessWidget {
                       value: items[index],
                       enabled: enabled,
                       path: '$path[$index]',
+                      messages: messages,
                       onChanged: (itemValue) {
                         final next = thawJsonValue(items)! as List<Object?>;
                         next[index] = itemValue;
@@ -422,7 +434,7 @@ final class _ArrayItemEditor extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Remove nested item',
+                    tooltip: messages.removeNestedItem,
                     onPressed: enabled && items.length > (schema.minItems ?? 0)
                         ? () {
                             final next = thawJsonValue(items)! as List<Object?>;
@@ -448,7 +460,7 @@ final class _ArrayItemEditor extends StatelessWidget {
                     ])
                   : null,
               icon: const Icon(Icons.add),
-              label: const Text('Add nested item'),
+              label: Text(messages.addNestedItem),
             ),
           ),
         ],
@@ -1009,9 +1021,9 @@ final class _SkyloomAsyncSelectField extends StatelessWidget {
               if (config.search)
                 TextField(
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Search',
-                    prefixIcon: Icon(Icons.search),
+                  decoration: InputDecoration(
+                    labelText: rendererContext.messages.search,
+                    prefixIcon: const Icon(Icons.search),
                   ),
                   onChanged: (query) {
                     debounce?.cancel();
@@ -1053,14 +1065,16 @@ final class _SkyloomAsyncSelectField extends StatelessWidget {
                                   force: true,
                                 ),
                               ),
-                              child: const Text('Retry'),
+                              child: Text(rendererContext.messages.retry),
                             ),
                           ],
                         ),
                       );
                     }
                     if (state.options.isEmpty) {
-                      return const Center(child: Text('No options found.'));
+                      return Center(
+                        child: Text(rendererContext.messages.noOptionsFound),
+                      );
                     }
                     return NotificationListener<ScrollNotification>(
                       onNotification: (notification) {
@@ -1106,7 +1120,7 @@ final class _SkyloomAsyncSelectField extends StatelessWidget {
                                           strokeWidth: 2,
                                         ),
                                       )
-                                    : const Text('Load more'),
+                                    : Text(rendererContext.messages.loadMore),
                               ),
                             ),
                         ],
@@ -1121,12 +1135,166 @@ final class _SkyloomAsyncSelectField extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
+            child: Text(rendererContext.messages.close),
           ),
         ],
       ),
     );
     debounce?.cancel();
+  }
+}
+
+/// Renders a platform-neutral upload trigger and JSON-safe uploaded files.
+final class MaterialFileFieldRenderer implements SkyloomFieldRenderer {
+  const MaterialFileFieldRenderer();
+
+  List<SkyloomUploadedFile> _files(Object? value) {
+    final values = value is List<Object?> ? value : <Object?>[value];
+    return values
+        .map(SkyloomUploadedFile.tryParse)
+        .whereType<SkyloomUploadedFile>()
+        .toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context, SkyloomRendererContext rendererContext) {
+    final schema = rendererContext.fieldSchema;
+    final config = schema.fileUpload!;
+    final field = rendererContext.fieldController;
+    final files = _files(field.value);
+    final handler =
+        rendererContext.formController.fileUploadHandlers[config.handler];
+    final editable = field.enabled && !field.readOnly && !field.loading;
+    final canAdd = !config.multiple || files.length < config.maxFiles;
+
+    void setUploadError(
+      String code, {
+      Map<String, Object?> arguments = const {},
+    }) {
+      final label = schema.label ?? schema.key;
+      field.setValidationError(
+        SkyloomValidationError(
+          code: code,
+          message: rendererContext.formController.validationEngine.messages
+              .validationMessage(code, label: label, arguments: arguments),
+          arguments: arguments,
+        ),
+      );
+    }
+
+    Future<void> pickFiles() async {
+      if (handler == null) {
+        setUploadError(
+          SkyloomValidationCode.uploadHandlerMissing,
+          arguments: {'handler': config.handler},
+        );
+        return;
+      }
+      field.setLoading(true);
+      try {
+        final selected = await handler(
+          SkyloomFileUploadRequest(
+            fieldKey: rendererContext.fieldPath,
+            configuration: config,
+            currentFiles: files,
+            formValues: rendererContext.formController.values,
+          ),
+        );
+        if (selected.isEmpty) return;
+        if (!config.multiple && selected.length > 1) {
+          setUploadError(
+            SkyloomValidationCode.uploadMaxFiles,
+            arguments: const {'limit': 1},
+          );
+          return;
+        }
+        final candidate = config.multiple
+            ? selected.map((file) => file.toJson()).toList(growable: true)
+            : selected.first.toJson();
+        final uploadError = rendererContext.formController.validationEngine
+            .validateFieldError(
+              schema,
+              candidate,
+              rendererContext.formController.values,
+              requiredOverride: field.required,
+            );
+        if (uploadError != null) {
+          field.setValidationError(uploadError);
+          return;
+        }
+        rendererContext.setValue(candidate);
+        rendererContext.formController.validateField(rendererContext.fieldPath);
+      } on Object catch (error) {
+        setUploadError(
+          SkyloomValidationCode.uploadFailed,
+          arguments: {'error': error.toString()},
+        );
+      } finally {
+        field.setLoading(false);
+      }
+    }
+
+    void removeFile(int index) {
+      if (config.multiple) {
+        final next = [...files]..removeAt(index);
+        rendererContext.setValue(
+          next.map((file) => file.toJson()).toList(growable: true),
+        );
+      } else {
+        rendererContext.setValue(null);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (schema.label != null)
+          Text(schema.label!, style: Theme.of(context).textTheme.titleSmall),
+        if (schema.description != null) ...[
+          const SizedBox(height: 4),
+          Text(schema.description!),
+        ],
+        if (files.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var index = 0; index < files.length; index++)
+                InputChip(
+                  avatar: const Icon(Icons.insert_drive_file_outlined),
+                  label: Text(files[index].name),
+                  onDeleted: editable ? () => removeFile(index) : null,
+                ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: editable && canAdd ? pickFiles : null,
+          icon: field.loading
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.upload_file_outlined),
+          label: Text(
+            field.loading
+                ? rendererContext.messages.uploading
+                : files.isNotEmpty && !config.multiple
+                ? rendererContext.messages.replaceFile
+                : config.multiple
+                ? rendererContext.messages.chooseFiles
+                : rendererContext.messages.chooseFile,
+          ),
+        ),
+        if (schema.helperText != null) ...[
+          const SizedBox(height: 4),
+          Text(schema.helperText!),
+        ],
+        if (field.error != null) _ErrorText(field.error!),
+      ],
+    );
   }
 }
 
@@ -1246,7 +1414,7 @@ final class _SkyloomDateField extends StatelessWidget {
               if (bounds.first.isAfter(bounds.last)) {
                 rendererContext.formController.setError(
                   rendererContext.fieldPath,
-                  'No selectable dates are available.',
+                  rendererContext.messages.noSelectableDates,
                 );
                 return;
               }

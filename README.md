@@ -56,9 +56,14 @@ Available now:
 - Controller-driven reveal/focus navigation across steps and sections
 - Structured backend error mapping with unknown-field policies
 - Guarded step transitions and completed-step tracking
+- Structured validation errors with stable codes and localizable messages
+- Multi-error schema diagnostics with configurable complexity limits
+- Provider-neutral single and multiple file-upload fields
 
-The remaining work before `1.0.0` is API stabilization, broader platform
-verification, benchmarks, and final migration documentation.
+The public API audit for `1.0.0` is complete. Broader platform verification,
+benchmarks, release notes, and final migration documentation remain before the
+stable release is published. See the
+[1.0 public API audit](doc/api-audit-1.0.md) for the compatibility decisions.
 
 ## How the complete system works
 
@@ -207,6 +212,31 @@ try {
   print(error.message); // Field key "email" is duplicated.
 }
 ```
+
+For editors, CI, remote schemas, and AI-generated schemas, use `validate` to
+collect independent problems instead of stopping at the first one:
+
+```dart
+const parser = SchemaParser(
+  unknownFieldTypePolicy: SchemaUnknownFieldTypePolicy.warning,
+  limits: SchemaLimits(maxFields: 200, maxNestingDepth: 8),
+);
+
+final result = parser.validate(candidateSchema);
+for (final diagnostic in result.diagnostics) {
+  print('${diagnostic.severity.name} ${diagnostic.code} '
+      '${diagnostic.path}: ${diagnostic.message}');
+}
+
+if (result.isValid) {
+  final schema = result.schema!;
+}
+```
+
+`parse` remains the fail-fast runtime API. It also enforces the configured
+field, nesting, array, option, and condition limits before building a schema.
+Unknown custom field types remain allowed by default; warning and error modes
+are opt-in because applications can register their own renderers.
 
 The full foundation contract is documented in the
 [schema 1.0 specification](doc/schema-v1.md).
@@ -543,6 +573,51 @@ SkyloomForm.fromJson(
 );
 ```
 
+### Structured errors and localization
+
+The existing string error API remains available as `field.error`. For logic,
+analytics, accessibility, and translated interfaces, use the structured form:
+
+```dart
+final failure = controller.field('email').validationError;
+print(failure?.code);      // invalidEmail
+print(failure?.arguments); // Rule-specific interpolation values.
+print(failure?.message);   // Localized display text.
+```
+
+Provide validation and package-owned Material copy without changing behavior
+by extending `SkyloomMessages`. English defaults are inherited for members you
+do not override:
+
+```dart
+final class AppMessages extends SkyloomMessages {
+  const AppMessages();
+
+  @override
+  String validationMessage(
+    String code, {
+    required String label,
+    Map<String, Object?> arguments = const {},
+  }) {
+    return switch (code) {
+      SkyloomValidationCode.required => '$label is mandatory.',
+      _ => '$label is invalid.',
+    };
+  }
+
+  @override
+  String get chooseFile => 'Select a document';
+}
+
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  messages: const AppMessages(),
+);
+```
+
+Rule-level `message` values still take precedence. When supplying an existing
+controller, configure its `ValidationEngine(messages: ...)` directly.
+
 ### Conditional fields
 
 ```dart
@@ -730,6 +805,68 @@ SkyloomForm.fromJson(
 Async validators expose idle, validating, success, and failure states. Change
 and blur modes debounce validation, stale results cannot overwrite newer
 values, results can be cached, and submission waits for validation to finish.
+
+### File uploads
+
+`FormType.file` renders a single or multiple upload field. The schema stores
+constraints and a handler name; the application owns file picking, transport,
+permissions, authentication, retries, and storage. This keeps the package
+portable across mobile, desktop, and web without forcing a picker or backend.
+
+```dart
+const resumeField = {
+  'key': 'documents',
+  'type': FormType.file,
+  'label': 'Documents',
+  'upload': {
+    'handler': 'documentUpload',
+    'multiple': true,
+    'accept': ['application/pdf', 'image/*', '.docx'],
+    'maxBytes': 5000000,
+    'maxFiles': 3,
+  },
+};
+
+SkyloomForm.fromJson(
+  schema: schemaJson,
+  fileUploadHandlers: {
+    'documentUpload': (request) async {
+      final uploaded = await pickAndUploadFiles(
+        acceptedTypes: request.configuration.accept,
+      );
+      return [
+        for (final item in uploaded)
+          SkyloomUploadedFile(
+            id: item.id,
+            name: item.name,
+            url: item.url,
+            mimeType: item.mimeType,
+            size: item.size,
+          ),
+      ];
+    },
+  },
+);
+```
+
+Form values contain JSON-safe uploaded-file references, never binary bytes:
+
+```json
+{
+  "documents": [
+    {
+      "id": "file_123",
+      "name": "resume.pdf",
+      "url": "https://cdn.example.com/file_123",
+      "mimeType": "application/pdf",
+      "size": 248312
+    }
+  ]
+}
+```
+
+The engine validates value shape, file count, byte size, exact MIME types,
+MIME wildcards such as `image/*`, and filename extensions such as `.pdf`.
 
 ### Responsive UI schema
 
@@ -936,6 +1073,7 @@ types:
 - Select
 - Date
 - Choice and filter chips
+- Single and multiple file uploads through application callbacks
 - Nested object groups
 - Primitive, object, and nested repeatable arrays
 
@@ -1043,7 +1181,7 @@ The current implementation sequence is:
 13. Multi-step forms and unified errors - complete
 14. Performance, accessibility, documentation, and examples - complete for
     the pre-1.0 baseline; ongoing benchmarks and platform audits remain
-15. Stable `1.0.0` API - next
+15. Stable `1.0.0` public API audit - complete; release verification remains
 
 ## Running checks
 

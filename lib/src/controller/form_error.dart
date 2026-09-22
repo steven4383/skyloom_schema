@@ -1,10 +1,17 @@
 /// A normalized field-level or form-level validation error.
 final class SkyloomErrorEntry {
-  const SkyloomErrorEntry({required this.message, this.fieldKey});
+  const SkyloomErrorEntry({
+    required this.message,
+    this.fieldKey,
+    this.code,
+    this.arguments = const {},
+  });
 
   /// Null for a form-level error.
   final String? fieldKey;
   final String message;
+  final String? code;
+  final Map<String, Object?> arguments;
 
   bool get isFormError => fieldKey == null;
 }
