@@ -51,6 +51,7 @@ checks.
 - `FileUploadSchema`, `SkyloomUploadedFile`, `SkyloomFileUploadRequest`, and
   `SkyloomFileUploadHandler`
 - `FormType.file`
+- `SkyloomSchema`, `SkyloomField`, and `SkyloomValidation` typed Dart builders
 
 No public member was removed or renamed by this slice.
 

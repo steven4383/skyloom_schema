@@ -6,6 +6,7 @@ import 'ui_schema.dart';
 
 /// Immutable, parsed definition of a Skyloom form.
 final class FormSchema {
+  /// Creates an immutable form definition from typed schema models.
   FormSchema({
     required this.id,
     required List<FieldSchema> fields,
@@ -24,19 +25,37 @@ final class FormSchema {
        metadata = _freezeMap(metadata, r'$.metadata'),
        additionalProperties = _freezeMap(additionalProperties, r'$');
 
+  /// Stable identifier for this form definition.
   final String id;
+
+  /// Version of the serialized schema contract.
   final String schemaVersion;
+
+  /// Optional human-readable form title.
   final String? title;
+
+  /// Optional supporting form description.
   final String? description;
+
+  /// Ordered root field definitions.
   final List<FieldSchema> fields;
+
+  /// Presentation metadata keyed by root field key.
   final Map<String, FieldUiSchema> uiSchema;
+
+  /// Optional visual groups for root fields.
   final List<SectionSchema> sections;
+
+  /// Optional ordered workflow steps.
   final List<StepSchema> steps;
+
+  /// JSON-compatible application metadata.
   final Map<String, Object?> metadata;
 
   /// Properties preserved for forward compatibility but not interpreted yet.
   final Map<String, Object?> additionalProperties;
 
+  /// Returns a mutable JSON-compatible copy of this definition.
   Map<String, Object?> toJson() {
     return <String, Object?>{
       ..._thawMap(additionalProperties),

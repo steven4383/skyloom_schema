@@ -577,6 +577,14 @@ class FeatureGuidesPage extends StatelessWidget {
           'Production patterns for responsive forms, conditions, remote data, and workflows.',
       children: const [
         _GuideCard(
+          title: 'Typed Dart authoring',
+          icon: Icons.code_outlined,
+          body:
+              'Use typed field factories for local schemas and keep maps for definitions received as JSON.',
+          code:
+              "final schema = SkyloomSchema.form(\n  id: 'profile',\n  fields: [\n    SkyloomField.text(\n      key: 'name',\n      validation: SkyloomValidation.rules(required: true),\n    ),\n  ],\n);",
+        ),
+        _GuideCard(
           title: 'Responsive layout',
           icon: Icons.devices_outlined,
           body:

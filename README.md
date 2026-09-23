@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/skyloom-logo-horizontal-green.svg" width="220" alt="Skyloom horizontal woven-thread logo">
+  <img src="assets/branding/skyloom-logo-mark.png" width="160" alt="Skyloom logo: a woven-thread S monogram in green">
 </p>
 
 # skyloom_schema
@@ -60,10 +60,7 @@ Available now:
 - Multi-error schema diagnostics with configurable complexity limits
 - Provider-neutral single and multiple file-upload fields
 
-The public API audit for `1.0.0` is complete. Broader platform verification,
-benchmarks, release notes, and final migration documentation remain before the
-stable release is published. See the
-[1.0 public API audit](doc/api-audit-1.0.md) for the compatibility decisions.
+See [CHANGELOG.md](CHANGELOG.md) for release history and compatibility notes.
 
 ## How the complete system works
 
@@ -87,7 +84,7 @@ Form engine
       v
 Renderer registry
   |-- default Material 3 renderers
-  `-- application or skyloom_ui renderers
+  `-- application-defined renderers
       |
       v
 Flutter form
@@ -99,8 +96,7 @@ JSON-compatible values
 The engine owns form behavior. Renderers receive the current schema and
 controller state, display the appropriate widget, and send user changes back
 to the controller. This separation allows the same form definition to use the
-default Material interface, an application-specific renderer, or the future
-`skyloom_ui` component library.
+default Material interface or application-specific renderers.
 
 ## Parsing a schema
 
@@ -163,6 +159,61 @@ const field = {
 `FormType.switchField` represents the JSON value `"switch"`; the longer Dart
 name is necessary because `switch` is a language keyword. JSON received from a
 server continues to use ordinary strings such as `"text"` and `"select"`.
+
+### Typed Dart schemas with autocomplete
+
+For schemas authored inside a Flutter application, use the typed builder API
+instead of a large `Map<String, Object?>`. Field factories expose named Dart
+parameters and still produce the same validated `FormSchema`:
+
+```dart
+final employeeSchema = SkyloomSchema.form(
+  id: 'employee_registration',
+  title: 'Employee Registration',
+  fields: [
+    SkyloomField.text(
+      key: 'name',
+      label: 'Full name',
+      placeholder: 'Enter the employee name',
+      validation: SkyloomValidation.rules(
+        required: true,
+        minLength: 2,
+        maxLength: 80,
+      ),
+    ),
+    SkyloomField.email(
+      key: 'email',
+      label: 'Email address',
+      validation: SkyloomValidation.rules(required: true, email: true),
+    ),
+    SkyloomField.select(
+      key: 'role',
+      label: 'Role',
+      options: [
+        FieldOption(label: 'Developer', value: 'developer'),
+        FieldOption(label: 'Manager', value: 'manager'),
+      ],
+      validation: SkyloomValidation.rules(required: true),
+    ),
+    SkyloomField.object(
+      key: 'address',
+      label: 'Address',
+      fields: [
+        SkyloomField.text(key: 'city', label: 'City'),
+      ],
+    ),
+  ],
+);
+
+SkyloomForm(
+  schema: employeeSchema,
+  onSubmit: (values) => debugPrint('$values'),
+);
+```
+
+Use this API for locally authored forms and `SkyloomForm.fromJson` or
+`SchemaParser.parse` for schemas received from JSON. `employeeSchema.toJson()`
+converts the typed definition back to the same JSON-compatible representation.
 
 ### Reading JSON text
 
@@ -894,7 +945,7 @@ const schemaJson = {
 
 Each device span uses a twelve-column grid. `widget` can override the renderer
 type, while `group` and `visualHints` remain available to custom renderers and
-the future `skyloom_ui` package.
+application-specific presentation logic.
 
 ### Form sections
 
@@ -1104,39 +1155,6 @@ top-level sections; it uses `ListView.builder`, accepts `cacheExtent`, and
 builds section blocks on demand. Individual fields remain independently
 reactive and are isolated with repaint boundaries.
 
-## Relationship with skyloom_ui
-
-The future `skyloom_ui` package will build on the renderer contract to provide
-Skyloom's polished component library.
-
-| Responsibility                    | `skyloom_schema` | `skyloom_ui` |
-| --------------------------------- | ------------------ | -------------- |
-| Schema parsing                    | Owns               | Uses           |
-| Values and state                  | Owns               | Observes       |
-| Validation and conditions         | Owns               | Displays       |
-| Serialization                     | Owns               | Uses           |
-| Basic Material widgets            | Provides           | Can replace    |
-| Brand styling and themes          | Does not own       | Owns           |
-| Animations and premium components | Does not own       | Owns           |
-
-The dependency direction is always:
-
-```text
-skyloom_ui --> skyloom_schema
-```
-
-`skyloom_schema` must never depend on `skyloom_ui`. Applications will be able
-to replace one renderer, register an application-specific field, or install a
-complete renderer collection supplied by `skyloom_ui`.
-
-```dart
-// Illustrative future API.
-SkyloomForm.fromJson(
-  schema: schemaJson,
-  renderers: SkyloomUiRenderers.defaults,
-);
-```
-
 ## Package boundaries
 
 `skyloom_schema` owns:
@@ -1159,29 +1177,7 @@ It does not own:
 - A cloud backend
 - Application-specific widgets
 
-Those capabilities belong in packages such as `skyloom_ui`, `skyloom_grid`,
-`skyloom_builder`, and `skyloom_cloud`.
-
-## Development order
-
-The current implementation sequence is:
-
-1. Schema specification and parser - complete
-2. Nested value paths and JSON serialization - complete
-3. `SkyloomFieldController` - complete
-4. `SkyloomFormController` - complete
-5. Basic validation engine - complete
-6. Renderer contract and registry - complete
-7. Material 3 text-field vertical slice - complete
-8. Remaining basic Material fields - complete
-9. Conditional logic and dynamic properties - complete
-10. Nested objects, arrays, and dependencies - complete
-11. Async data and async validation - complete
-12. Responsive UI metadata and sections - complete
-13. Multi-step forms and unified errors - complete
-14. Performance, accessibility, documentation, and examples - complete for
-    the pre-1.0 baseline; ongoing benchmarks and platform audits remain
-15. Stable `1.0.0` public API audit - complete; release verification remains
+Those capabilities are intentionally outside this package's public scope.
 
 ## Running checks
 

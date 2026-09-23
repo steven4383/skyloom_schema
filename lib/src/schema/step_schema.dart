@@ -2,6 +2,7 @@ import '../utils/json_value_utils.dart';
 
 /// One ordered page in a multi-step form workflow.
 final class StepSchema {
+  /// Creates one ordered workflow step containing root [fields].
   StepSchema({
     required this.id,
     required List<String> fields,
@@ -15,15 +16,25 @@ final class StepSchema {
          path: r'$.steps[].visibleWhen',
        );
 
+  /// Unique workflow-step identifier.
   final String id;
+
+  /// Optional heading displayed for this step.
   final String? title;
+
+  /// Optional supporting step text.
   final String? description;
+
+  /// Root field keys assigned to this step.
   final List<String> fields;
+
+  /// Sort order relative to other steps.
   final int order;
 
   /// Optional condition-engine expression controlling step visibility.
   final Object? visibleWhen;
 
+  /// Converts this step to its JSON-compatible representation.
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     if (title != null) 'title': title,

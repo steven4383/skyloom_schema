@@ -1,0 +1,12 @@
+# Maintainer-only planning
+/doc/maintainer-roadmap.md
+/doc/api-audit-1.0.md
+
+# Local editor and generated files
+/.idea/
+/.vscode/
+*.iml
+/pubspec.lock
+/.dart_tool/
+/build/
+/coverage/

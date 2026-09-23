@@ -12,7 +12,9 @@ topics:
   - material-design
 
 screenshots:
-  - description: Skyloom package logo
+  - description: Skyloom logo, a woven-thread S monogram in green
+    path: assets/branding/skyloom-logo-mark.png
+  - description: Skyloom horizontal wordmark
     path: assets/branding/skyloom-logo-horizontal-green.png
 
 environment:

@@ -1,5 +1,6 @@
 /// Declarative configuration for a JSON-safe file-upload field.
 final class FileUploadSchema {
+  /// Creates declarative constraints for an application-owned upload handler.
   FileUploadSchema({
     required String handler,
     this.multiple = false,
@@ -11,12 +12,22 @@ final class FileUploadSchema {
        maxBytes = _positiveMaxBytes(maxBytes),
        maxFiles = _validMaxFiles(maxFiles, multiple);
 
+  /// Name used to look up the upload callback supplied to the form.
   final String handler;
+
+  /// Whether the field stores a list instead of one uploaded-file object.
   final bool multiple;
+
+  /// Accepted MIME types, MIME wildcards, or filename extensions.
   final List<String> accept;
+
+  /// Optional maximum size of each uploaded file in bytes.
   final int? maxBytes;
+
+  /// Maximum number of file references stored by the field.
   final int maxFiles;
 
+  /// Converts this configuration to its JSON-compatible representation.
   Map<String, Object?> toJson() => <String, Object?>{
     'handler': handler,
     if (multiple) 'multiple': true,

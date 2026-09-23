@@ -16,7 +16,7 @@ The component explorer includes:
 - Common and type-specific property notes
 - Form, field, and validation API reference tables
 - Guides for responsive layouts, conditions, dependencies, remote options,
-  workflows, and controller integration
+  workflows, typed Dart authoring, and controller integration
 
 ## Minimal form
 

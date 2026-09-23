@@ -35,5 +35,6 @@ export 'src/schema/validation_schema.dart';
 export 'src/schema/validation_rule.dart';
 export 'src/schema/ui_schema.dart';
 export 'src/schema/section_schema.dart';
+export 'src/schema/schema_builder.dart';
 export 'src/schema/step_schema.dart';
 export 'src/utils/path_utils.dart';
