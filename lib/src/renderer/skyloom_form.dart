@@ -23,6 +23,7 @@ import 'material/form_actions.dart';
 import 'material/form_error_summary.dart';
 import 'material/form_step_progress.dart';
 import 'material/material_renderers.dart';
+import 'material/skyloom_theme.dart';
 import 'renderer_context.dart';
 
 /// Controls how a [SkyloomForm] participates in vertical layout.
@@ -445,13 +446,15 @@ final class _SkyloomFormState extends State<SkyloomForm> {
 
   Widget _buildSection(SectionSchema section, List<FieldSchema> fields) {
     final colors = Theme.of(context).colorScheme;
+    final tokens = SkyloomThemeTokens.of(context);
     final content = Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: _buildResponsiveFields(fields),
     );
     final decoration = BoxDecoration(
       color: colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(tokens.surfaceRadius),
+      border: tokens.surfaceBorder(colors),
     );
     if (section.collapsible) {
       return AnimatedBuilder(
@@ -468,7 +471,7 @@ final class _SkyloomFormState extends State<SkyloomForm> {
             child: DecoratedBox(
               decoration: decoration,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(tokens.surfaceRadius),
                 child: ExpansionTile(
                   controller: _sectionControllers.putIfAbsent(
                     section.id,
@@ -788,12 +791,14 @@ final class _UnsupportedFieldType extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final tokens = SkyloomThemeTokens.of(context);
     return Semantics(
       label: messages.unsupportedField(fieldType, fieldKey),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.errorContainer,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(tokens.fieldRadius),
+          border: tokens.surfaceBorder(colors),
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),

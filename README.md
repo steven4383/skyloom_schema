@@ -10,7 +10,7 @@ while keeping rendering replaceable.
 
 > Define the form once. Render it anywhere in Flutter.
 
-## Project status
+## Status
 
 The package is currently at version `0.10.0-dev.1`.
 

@@ -9,10 +9,8 @@
 - Add asynchronous step-transition guards, navigation loading state,
   completed-step tracking, step error counts, and optional progress-chip
   navigation.
-- Add the horizontal four-thread green Skyloom logo as an editable SVG vector.
-- Show the woven-thread Skyloom monogram as the README header and as the
-  primary pub.dev screenshot, replacing the SVG header that pub.dev does not
-  render.
+- Use the green woven-thread Skyloom monogram throughout the README, pub.dev
+  package metadata, and example documentation app.
 - Revalidate displayed field errors as users correct values in blur and submit
   validation modes while preserving fully manual validation.
 - Avoid repeating a field label when its validation-summary message already

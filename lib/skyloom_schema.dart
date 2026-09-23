@@ -21,6 +21,7 @@ export 'src/parser/schema_limits.dart';
 export 'src/registry/renderer_registry.dart';
 export 'src/renderer/field_renderer.dart';
 export 'src/renderer/material/material_renderers.dart';
+export 'src/renderer/material/skyloom_theme.dart';
 export 'src/renderer/renderer_context.dart';
 export 'src/renderer/skyloom_form.dart';
 export 'src/schema/field_option.dart';

@@ -9,6 +9,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(const example.SkyloomDocsApp());
+    expect(find.bySemanticsLabel('Skyloom logo'), findsOneWidget);
     await tester.tap(find.text('Guides'));
     await tester.pumpAndSettle();
 
@@ -23,6 +24,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(const example.SkyloomDocsApp());
+    expect(find.bySemanticsLabel('Skyloom logo'), findsOneWidget);
     await tester.tap(find.text('Guides'));
     await tester.pumpAndSettle();
 

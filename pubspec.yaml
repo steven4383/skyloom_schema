@@ -1,6 +1,6 @@
 name: skyloom_schema
 description: A headless-first, schema-driven form engine for Flutter.
-version: 0.10.0-dev.2
+version: 0.10.0-dev.3
 license: MIT
 repository: https://github.com/steven4383/skyloom_schema
 issue_tracker: https://github.com/steven4383/skyloom_schema/issues
@@ -14,8 +14,6 @@ topics:
 screenshots:
   - description: Skyloom logo, a woven-thread S monogram in green
     path: assets/branding/skyloom-logo-mark.png
-  - description: Skyloom horizontal wordmark
-    path: assets/branding/skyloom-logo-horizontal-green.png
 
 environment:
   sdk: ^3.12.0
@@ -35,11 +33,10 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/branding/skyloom-logo-mark.png
 
-  # To add assets to your package, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # To add more assets to your package, add them to the assets list above.
   #
   # For details regarding assets in packages, see
   # https://flutter.dev/to/asset-from-package

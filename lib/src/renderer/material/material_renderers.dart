@@ -14,6 +14,7 @@ import '../../utils/json_value_utils.dart';
 import '../../utils/path_utils.dart';
 import '../field_renderer.dart';
 import '../renderer_context.dart';
+import 'skyloom_theme.dart';
 
 /// Creates the basic, theme-aware Material renderer collection.
 final class MaterialSkyloomRenderers {
@@ -51,10 +52,12 @@ final class MaterialObjectFieldRenderer implements SkyloomFieldRenderer {
     final schema = rendererContext.fieldSchema;
     final fields = schema.fields ?? const <FieldSchema>[];
     final colors = Theme.of(context).colorScheme;
+    final tokens = SkyloomThemeTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(tokens.surfaceRadius),
+        border: tokens.surfaceBorder(colors),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -118,10 +121,12 @@ final class _SkyloomArrayField extends StatelessWidget {
         (schema.maxItems == null || values.length < schema.maxItems!);
 
     final colors = Theme.of(context).colorScheme;
+    final tokens = SkyloomThemeTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(tokens.surfaceRadius),
+        border: tokens.surfaceBorder(colors),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -254,10 +259,12 @@ final class _ArrayItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final tokens = SkyloomThemeTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(tokens.surfaceRadius),
+        border: tokens.surfaceBorder(colors),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),

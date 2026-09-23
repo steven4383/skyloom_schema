@@ -6,48 +6,45 @@ import 'package:skyloom_schema/skyloom_schema.dart';
 
 void main() => runApp(const SkyloomDocsApp());
 
-class SkyloomDocsApp extends StatelessWidget {
+class SkyloomDocsApp extends StatefulWidget {
   const SkyloomDocsApp({super.key});
 
   @override
+  State<SkyloomDocsApp> createState() => _SkyloomDocsAppState();
+}
+
+class _SkyloomDocsAppState extends State<SkyloomDocsApp> {
+  final themeController = SkyloomThemeController();
+
+  @override
   Widget build(BuildContext context) {
-    final colors = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF276B5D),
-      brightness: Brightness.light,
-      surface: const Color(0xFFF6F8F7),
+    return AnimatedBuilder(
+      animation: themeController,
+      builder: (context, _) {
+        final skyloomTheme = themeController.theme;
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Skyloom Schema Docs',
+          themeMode: themeController.themeMode,
+          theme: skyloomTheme.lightTheme,
+          darkTheme: skyloomTheme.darkTheme,
+          home: DocsShell(themeController: themeController),
+        );
+      },
     );
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Skyloom Schema Docs',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: colors,
-        scaffoldBackgroundColor: colors.surface,
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: colors.surfaceContainerLowest,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: colors.outlineVariant),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: colors.surfaceContainerLowest,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colors.outlineVariant),
-          ),
-        ),
-      ),
-      home: const DocsShell(),
-    );
+  }
+
+  @override
+  void dispose() {
+    themeController.dispose();
+    super.dispose();
   }
 }
 
 class DocsShell extends StatefulWidget {
-  const DocsShell({super.key});
+  const DocsShell({required this.themeController, super.key});
+
+  final SkyloomThemeController themeController;
 
   @override
   State<DocsShell> createState() => _DocsShellState();
@@ -78,8 +75,9 @@ class _DocsShellState extends State<DocsShell> {
               ? null
               : AppBar(
                   title: const _Brand(showName: true),
-                  actions: const [
-                    Padding(
+                  actions: [
+                    _ThemeControls(controller: widget.themeController),
+                    const Padding(
                       padding: EdgeInsets.only(right: 16),
                       child: _VersionBadge(),
                     ),
@@ -97,12 +95,22 @@ class _DocsShellState extends State<DocsShell> {
                         padding: EdgeInsets.fromLTRB(16, 22, 16, 30),
                         child: _Brand(showName: true),
                       ),
-                      trailing: const Expanded(
+                      trailing: Expanded(
                         child: Align(
                           alignment: Alignment.bottomCenter,
                           child: Padding(
-                            padding: EdgeInsets.only(bottom: 20),
-                            child: _VersionBadge(),
+                            padding: const EdgeInsets.only(bottom: 20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _ThemeControls(
+                                  controller: widget.themeController,
+                                  direction: Axis.vertical,
+                                ),
+                                const SizedBox(height: 12),
+                                const _VersionBadge(),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -143,6 +151,44 @@ class _DocsShellState extends State<DocsShell> {
   }
 
   void selectPage(int value) => setState(() => selected = value);
+}
+
+class _ThemeControls extends StatelessWidget {
+  const _ThemeControls({required this.controller, this.direction = Axis.horizontal});
+
+  final SkyloomThemeController controller;
+  final Axis direction;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Flex(
+      direction: direction,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: const Key('theme-mode-toggle'),
+          tooltip: dark ? 'Use light mode' : 'Use true-black dark mode',
+          onPressed: () => controller.toggleBrightness(
+            Theme.of(context).brightness,
+          ),
+          icon: Icon(dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+        ),
+        IconButton(
+          key: const Key('visual-style-toggle'),
+          tooltip: controller.visualStyle == SkyloomVisualStyle.standard
+              ? 'Use brutalism style'
+              : 'Use standard style',
+          onPressed: controller.toggleVisualStyle,
+          icon: Icon(
+            controller.visualStyle == SkyloomVisualStyle.standard
+                ? Icons.crop_square
+                : Icons.rounded_corner,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class ComponentCatalogPage extends StatefulWidget {
@@ -872,14 +918,15 @@ class _Brand extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary,
-            borderRadius: BorderRadius.circular(12),
+        SizedBox(
+          width: 42,
+          height: 42,
+          child: Image.asset(
+            'assets/branding/skyloom-logo-mark.png',
+            package: 'skyloom_schema',
+            fit: BoxFit.contain,
+            semanticLabel: 'Skyloom logo',
           ),
-          child: const Icon(Icons.hub_outlined, color: Colors.white, size: 21),
         ),
         if (showName) ...[
           const SizedBox(width: 10),

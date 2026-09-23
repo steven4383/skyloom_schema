@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../controller/form_error.dart';
 import '../../controller/form_controller.dart';
 import '../../engine/skyloom_messages.dart';
+import 'skyloom_theme.dart';
 
 typedef SkyloomFieldLabelResolver = String Function(String fieldPath);
 typedef SkyloomRevealErrorCallback = void Function(String fieldPath);
@@ -34,6 +35,7 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
         final errors = controller.errorEntries;
         if (!visible || errors.isEmpty) return const SizedBox.shrink();
         final colors = Theme.of(context).colorScheme;
+        final tokens = SkyloomThemeTokens.of(context);
         return Semantics(
           container: true,
           liveRegion: true,
@@ -43,7 +45,8 @@ final class SkyloomMaterialErrorSummary extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.errorContainer,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(tokens.surfaceRadius),
+                border: tokens.surfaceBorder(colors),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
