@@ -11,6 +11,9 @@
   navigation.
 - Use the green woven-thread Skyloom monogram throughout the README, pub.dev
   package metadata, and example documentation app.
+- Add optional whole-application standard and brutalism themes, custom color
+  schemes, a true-black dark palette, and runtime appearance controls.
+- Add a responsive theme-comparison screen to the example application.
 - Revalidate displayed field errors as users correct values in blur and submit
   validation modes while preserving fully manual validation.
 - Avoid repeating a field label when its validation-summary message already

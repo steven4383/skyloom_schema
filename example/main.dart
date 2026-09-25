@@ -53,13 +53,9 @@ class DocsShell extends StatefulWidget {
 class _DocsShellState extends State<DocsShell> {
   int selected = 0;
 
-  static const pages = <Widget>[
-    ComponentCatalogPage(),
-    SchemaReferencePage(),
-    FeatureGuidesPage(),
-  ];
   static const destinations = [
     ('Components', Icons.grid_view_outlined, Icons.grid_view),
+    ('Themes', Icons.palette_outlined, Icons.palette),
     ('Schema API', Icons.data_object_outlined, Icons.data_object),
     ('Guides', Icons.menu_book_outlined, Icons.menu_book),
   ];
@@ -69,7 +65,15 @@ class _DocsShellState extends State<DocsShell> {
     return LayoutBuilder(
       builder: (context, size) {
         final desktop = size.maxWidth >= 960;
-        final content = IndexedStack(index: selected, children: pages);
+        final content = IndexedStack(
+          index: selected,
+          children: [
+            const ComponentCatalogPage(),
+            ThemeShowcasePage(controller: widget.themeController),
+            const SchemaReferencePage(),
+            const FeatureGuidesPage(),
+          ],
+        );
         return Scaffold(
           appBar: desktop
               ? null
@@ -77,10 +81,7 @@ class _DocsShellState extends State<DocsShell> {
                   title: const _Brand(showName: true),
                   actions: [
                     _ThemeControls(controller: widget.themeController),
-                    const Padding(
-                      padding: EdgeInsets.only(right: 16),
-                      child: _VersionBadge(),
-                    ),
+                    const SizedBox(width: 8),
                   ],
                 ),
           body: desktop
@@ -154,7 +155,10 @@ class _DocsShellState extends State<DocsShell> {
 }
 
 class _ThemeControls extends StatelessWidget {
-  const _ThemeControls({required this.controller, this.direction = Axis.horizontal});
+  const _ThemeControls({
+    required this.controller,
+    this.direction = Axis.horizontal,
+  });
 
   final SkyloomThemeController controller;
   final Axis direction;
@@ -169,10 +173,11 @@ class _ThemeControls extends StatelessWidget {
         IconButton(
           key: const Key('theme-mode-toggle'),
           tooltip: dark ? 'Use light mode' : 'Use true-black dark mode',
-          onPressed: () => controller.toggleBrightness(
-            Theme.of(context).brightness,
+          onPressed: () =>
+              controller.toggleBrightness(Theme.of(context).brightness),
+          icon: Icon(
+            dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
           ),
-          icon: Icon(dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
         ),
         IconButton(
           key: const Key('visual-style-toggle'),
@@ -463,6 +468,207 @@ class _ComponentDocCardState extends State<ComponentDocCard> {
       const SnackBar(
         behavior: SnackBarBehavior.floating,
         content: Text('Schema copied'),
+      ),
+    );
+  }
+}
+
+const _themePreviewSchema = <String, Object?>{
+  'id': 'theme_preview',
+  'fields': [
+    {
+      'key': 'name',
+      'type': FormType.text,
+      'label': 'Project name',
+      'validation': {'required': true},
+    },
+    {
+      'key': 'role',
+      'type': FormType.select,
+      'label': 'Workspace role',
+      'options': [
+        {'label': 'Developer', 'value': 'developer'},
+        {'label': 'Designer', 'value': 'designer'},
+      ],
+    },
+    {
+      'key': 'channels',
+      'type': FormType.chip,
+      'label': 'Notifications',
+      'options': [
+        {'label': 'Email', 'value': 'email'},
+        {'label': 'Push', 'value': 'push'},
+        {'label': 'Weekly digest', 'value': 'digest'},
+      ],
+      'visualHints': {FormUiHint.multiSelect: true},
+    },
+    {
+      'key': 'enabled',
+      'type': FormType.switchField,
+      'label': 'Enable workspace',
+      'defaultValue': true,
+    },
+  ],
+};
+
+class ThemeShowcasePage extends StatelessWidget {
+  const ThemeShowcasePage({required this.controller, super.key});
+
+  final SkyloomThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DocsPage(
+      eyebrow: 'APPEARANCE',
+      title: 'Standard and brutalism themes',
+      description:
+          'Compare both built-in styles with the same generated form. The previews follow the current light or dark mode.',
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 840 ? 2 : 1;
+            final width = (constraints.maxWidth - (columns - 1) * 18) / columns;
+            return Wrap(
+              spacing: 18,
+              runSpacing: 18,
+              children: [
+                SizedBox(
+                  width: width,
+                  child: _ThemePreview(
+                    title: 'Standard',
+                    description:
+                        'Rounded Material 3 surfaces with quiet borders and elevation.',
+                    visualStyle: SkyloomVisualStyle.standard,
+                    controller: controller,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _ThemePreview(
+                    title: 'Brutalism',
+                    description:
+                        'Square corners, heavy outlines, strong type, and hard elevation.',
+                    visualStyle: SkyloomVisualStyle.brutalism,
+                    controller: controller,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Use either style',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                const _CodeBlock(
+                  value:
+                      "const appearance = SkyloomTheme(\n  seedColor: Colors.teal,\n  visualStyle: SkyloomVisualStyle.brutalism,\n);\n\nMaterialApp(\n  theme: appearance.lightTheme,\n  darkTheme: appearance.darkTheme,\n  themeMode: ThemeMode.system,\n);",
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThemePreview extends StatelessWidget {
+  const _ThemePreview({
+    required this.title,
+    required this.description,
+    required this.visualStyle,
+    required this.controller,
+  });
+
+  final String title;
+  final String description;
+  final SkyloomVisualStyle visualStyle;
+  final SkyloomThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final appearance = SkyloomTheme(
+      seedColor: controller.seedColor,
+      visualStyle: visualStyle,
+      pureBlackDark: controller.pureBlackDark,
+    );
+    final previewTheme = dark ? appearance.darkTheme : appearance.lightTheme;
+    final active = controller.visualStyle == visualStyle;
+    return Theme(
+      data: previewTheme,
+      child: Builder(
+        builder: (context) {
+          final theme = Theme.of(context);
+          return Card(
+            margin: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            child: Material(
+              color: theme.scaffoldBackgroundColor,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title, style: theme.textTheme.titleLarge),
+                              const SizedBox(height: 4),
+                              Text(
+                                description,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (active)
+                          const Chip(
+                            avatar: Icon(Icons.check, size: 16),
+                            label: Text('Active'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SkyloomForm.fromJson(
+                      schema: _themePreviewSchema,
+                      layout: SkyloomFormLayout.column,
+                      initialValues: const {
+                        'name': 'Skyloom workspace',
+                        'role': 'developer',
+                        'channels': ['email', 'push'],
+                      },
+                      submitButtonLabel: 'Save preview',
+                      onSubmit: (_) {},
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      key: ValueKey('apply-${visualStyle.name}'),
+                      onPressed: active
+                          ? null
+                          : () => controller.setVisualStyle(visualStyle),
+                      icon: Icon(active ? Icons.check : Icons.palette_outlined),
+                      label: Text(active ? '$title active' : 'Use $title'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

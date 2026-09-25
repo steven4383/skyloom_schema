@@ -6,7 +6,7 @@ field renderer and the Schema 1.0 contract.
 Run it from the package root:
 
 ```sh
-flutter run example/main.dart
+flutter run -t example/main.dart -d chrome
 ```
 
 The component explorer includes:
@@ -17,6 +17,7 @@ The component explorer includes:
 - Form, field, and validation API reference tables
 - Guides for responsive layouts, conditions, dependencies, remote options,
   workflows, typed Dart authoring, and controller integration
+- Side-by-side standard and brutalism theme previews with live switching
 
 ## Minimal form
 

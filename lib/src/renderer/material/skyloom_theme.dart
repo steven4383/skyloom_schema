@@ -78,10 +78,7 @@ final class SkyloomThemeTokens extends ThemeExtension<SkyloomThemeTokens> {
   );
 
   @override
-  SkyloomThemeTokens lerp(
-    covariant SkyloomThemeTokens? other,
-    double t,
-  ) {
+  SkyloomThemeTokens lerp(covariant SkyloomThemeTokens? other, double t) {
     if (other == null) return this;
     return SkyloomThemeTokens(
       visualStyle: t < 0.5 ? visualStyle : other.visualStyle,
@@ -172,10 +169,7 @@ final class SkyloomTheme {
       ),
     );
     final focusedInputBorder = inputBorder.copyWith(
-      borderSide: BorderSide(
-        color: brutalism ? colors.primary : colors.primary,
-        width: 2,
-      ),
+      borderSide: BorderSide(color: colors.primary, width: 2),
     );
     final controlShape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(brutalism ? 0 : 12),
@@ -269,15 +263,24 @@ final class SkyloomTheme {
 
 /// Controls application brightness and Skyloom visual style at runtime.
 final class SkyloomThemeController extends ChangeNotifier {
-  SkyloomThemeController({
+  factory SkyloomThemeController({
     ThemeMode themeMode = ThemeMode.system,
     SkyloomVisualStyle visualStyle = SkyloomVisualStyle.standard,
     Color seedColor = const Color(0xFF276B5D),
     bool pureBlackDark = true,
-  }) : _themeMode = themeMode,
-       _visualStyle = visualStyle,
-       _seedColor = seedColor,
-       _pureBlackDark = pureBlackDark;
+  }) => SkyloomThemeController._(
+    themeMode,
+    visualStyle,
+    seedColor,
+    pureBlackDark,
+  );
+
+  SkyloomThemeController._(
+    this._themeMode,
+    this._visualStyle,
+    this._seedColor,
+    this._pureBlackDark,
+  );
 
   ThemeMode _themeMode;
   SkyloomVisualStyle _visualStyle;

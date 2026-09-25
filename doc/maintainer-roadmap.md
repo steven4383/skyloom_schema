@@ -48,3 +48,33 @@ to identify any newly exposed API without Dartdoc comments.
 
 Run platform-specific example verification before each stable release and add
 a regression test for every corrected parser, controller, or renderer defect.
+
+## Remaining visual-style coverage
+
+The standard and brutalism application themes are available. Before treating
+both styles as visually complete, audit and explicitly theme these remaining
+Material component groups in both light and true-black dark modes:
+
+1. Checkbox, radio, and switch selected, disabled, error, hover, and focus
+   states (`CheckboxThemeData`, `RadioThemeData`, and `SwitchThemeData`).
+2. Icon buttons and array-item move, duplicate, remove, and overflow actions.
+3. Select menus, popup menus, async-search dialogs, loading rows, empty rows,
+   and pagination states.
+4. Date-picker dialog, calendar day states, year selector, and range-bound
+   errors.
+5. File-upload buttons, uploaded-file chips, empty state, failure state,
+   progress state, and drag-and-drop treatment if added later.
+6. Expansion tiles, collapsible section headers, workflow progress chips,
+   error badges, and error-summary actions.
+7. Circular progress indicators, snack bars, tooltips, dialogs, and bottom
+   sheets.
+8. Application navigation components: app bar, navigation rail, navigation
+   bar, tabs, drawers, and selected indicators.
+9. Consistent spacing, density, typography, focus rings, motion, and reduced-
+   motion behavior across every renderer state.
+10. RTL, text scaling, high-contrast accessibility, keyboard navigation, and
+    golden tests for mobile, tablet, and desktop breakpoints.
+11. Optional full Cupertino parity: text and picker fields, boolean controls,
+    dates, files, nested collections, sections, workflow navigation, actions,
+    dialogs, and error presentation. Field-level Cupertino overrides already
+    work through `SkyloomFieldRenderer`; the complete shell is not bundled.
